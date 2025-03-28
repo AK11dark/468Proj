@@ -1,0 +1,59 @@
+**Queen’s University**  
+**School of Computing**  
+
+**CISC 468: Cryptography**  
+**Course Project Description**  
+
+**Winter 2025**  
+
+This handout outlines the separate requirements for the CISC 468 and CISC 878 course projects.  
+
+### **CISC 468: P2P Secure File Sharing Application**  
+CISC 468 projects will design and implement a peer-to-peer secure file sharing application. Each project should be completed in groups of two and should consist of two clients written in two different programming languages, such as Python, Java, Rust, or Go. The clients should be able to communicate with each other despite being implemented with different cryptographic APIs in two different languages. The application must:  
+
+1. **Support peer discovery** on a local network using a protocol like mDNS or BitTorrent.  
+2. **Support mutual authentication** of contacts, ensuring verified identities.  
+3. **Allow peers to request or send files** with recipient consent.  
+4. **Allow peers to request a list of available files** without consent.  
+5. **Enable indirect file retrieval**, verifying file integrity if a peer is offline.  
+6. **Support key migration** if an old key is compromised, notifying contacts.  
+7. **Guarantee confidentiality and integrity** of transmitted files.  
+8. **Support perfect forward secrecy**, preventing past communication decryption if a long-term secret is compromised.  
+9. **Securely store files** locally to prevent unauthorized access in case of device theft.  
+10. **Provide error messages** for security failures and ensure test cases cover relevant scenarios.  
+
+---
+
+
+#### **Useful Resources**  
+- Secure Multiparty Computation (MPC)  
+- Private-ID protocol  
+- Private Join and Compute  
+- Verifiable Distributed Aggregation Functions (VDAF)  
+- Rust implementation of Prio3 (used in COVID-19 exposure notifications)  
+- “Awesome MPC” and “Awesome Zero Knowledge Proofs (ZKP)” compilations  
+- Zero-Knowledge Wordle example  
+
+(Links to resources are provided in the original document.)  
+
+---
+
+### **Deliverables**  
+The project accounts for **25% of the final grade** and consists of:  
+
+- **Proposals (5%)** – Due **Feb. 25, 2025**.  
+  - CISC 468: Indicate team members and programming languages.
+
+- **Presentations (10%)** – Format and dates **TBA**, held in the last 1-2 weeks of class.  
+
+- **Report & Implementation (85%)** – Final report (in **LaTeX using ACM template**) and GitHub repository submission.  
+  - CISC 468: Explain application design, security guarantees, and communication protocol.   
+  - Reports must be clear, concise, professional, and free of plagiarism. **Up to 20% of marks may be deducted for poor clarity, grammar, or formatting.**  
+
+(Document version: **Feb. 11, 2025**)  
+
+(Links to Overleaf, Cambridge Dictionary, and writing resources are included in the original document.)  
+
+---
+
+Let me know if you need it formatted differently or converted into another format!
