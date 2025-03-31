@@ -1,3 +1,19 @@
+plan!
+# Correct DHE-RSA flow should be:
+
+1. Initial Connection (what we have now):
+   - Exchange RSA public keys for identity verification
+
+2. DH Key Exchange:
+   - Generate DH parameters and public value
+   - Sign DH public value with our RSA private key
+   - Send both DH public value and signature to peer
+   - Verify peer's DH value using their RSA public key
+   - Generate shared secret using DH
+
+3. Verification:
+   - Use the DH shared secret for secure communication
+   - Use RSA signatures only for verifying DH parameters
 **Queen’s University**  
 **School of Computing**  
 
@@ -11,16 +27,30 @@ This handout outlines the separate requirements for the CISC 468 and CISC 878 co
 ### **CISC 468: P2P Secure File Sharing Application**  
 CISC 468 projects will design and implement a peer-to-peer secure file sharing application. Each project should be completed in groups of two and should consist of two clients written in two different programming languages, such as Python, Java, Rust, or Go. The clients should be able to communicate with each other despite being implemented with different cryptographic APIs in two different languages. The application must:  
 
-1. **Support peer discovery** on a local network using a protocol like mDNS or BitTorrent.  
-2. **Support mutual authentication** of contacts, ensuring verified identities.  
-3. **Allow peers to request or send files** with recipient consent.  
-4. **Allow peers to request a list of available files** without consent.  
-5. **Enable indirect file retrieval**, verifying file integrity if a peer is offline.  
-6. **Support key migration** if an old key is compromised, notifying contacts.  
-7. **Guarantee confidentiality and integrity** of transmitted files.  
+1. Support peer discovery on a local network. A simple protocol that can be used for peer discovery on
+a local network is mDNS. On the Internet, a more sophisticated protocol such as BitTorrent would be
+required
+2. Support mutual authentication of contacts. In other words, after key verification has been performed,
+each individual user should be assured of the identity of the user who they are communicating with.
+3. Peers should be able to request files from each other, or send a file to another peer; the peer receiving
+a request or receiving a file should consent before the request is processed.
+4. Peers should be able to request a list of files available to be shared by each other (consent is not
+required).
+5. If a peer A is offline, but peer B already had peer A’s list of available files, peer B may find another
+peer C that had previously downloaded the file from peer A, and request the file from them instead.
+But peer B must be able to verify that the file has not been tampered with (i.e., that it is the same
+file that peer A was offering) 
+6. Allow users to migrate to a new key if their old one is compromised. Existing contacts should be
+notified, in this case, and any necessary steps should be taken to re-establish authenticated and secure
+communication.  
+7. Guarantee the confidentiality and integrity of any files that are sent between users
 8. **Support perfect forward secrecy**, preventing past communication decryption if a long-term secret is compromised.  
-9. **Securely store files** locally to prevent unauthorized access in case of device theft.  
-10. **Provide error messages** for security failures and ensure test cases cover relevant scenarios.  
+9. Securely store files on the local client device, so that an attacker who steals the device should not be
+able to read them.
+10. Display an appropriate message to the user if any error occurs (e.g., if a file cannot be delivered) or a
+security check fails (e.g., if a file has been tampered with in transit). Your repository must contain
+test cases to check for such relevant scenarios.
+
 
 ---
 
