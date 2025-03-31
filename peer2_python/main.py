@@ -15,11 +15,15 @@ async def handle_user_input(service, file_transfer, auth_manager):
         print("4. Send file to peer")
         print("5. Show session keys")
         print("6. Authenticate with peer")
-        print("7. Exit")
+        print("7. Refresh peer information")
+        print("8. Exit")
         try:
-            command = await asyncio.get_event_loop().run_in_executor(None, input, "\nEnter command (1-7): ")
+            command = await asyncio.get_event_loop().run_in_executor(None, input, "\nEnter command (1-8): ")
             
             if command == "1":
+                # Refresh peer info silently
+                await service.discovery.refresh_peers_info()
+                
                 peers = service.discovery.get_peers()
                 if not peers:
                     print("\nNo peers found yet.")
@@ -30,8 +34,12 @@ async def handle_user_input(service, file_transfer, auth_manager):
                         print(f"  Address: {data['address']}")
                         print(f"  Network Port: {data['port']}")
                         print(f"  Discovery Port: {data.get('discovery_port', data['port'])}")
-                        if 'files' in data:
-                            print(f"  Shared files: {data['files']}")
+                        if 'files' in data and data['files']:
+                            print(f"  Shared files:")
+                            for file in data['files']:
+                                print(f"    - {file}")
+                        else:
+                            print(f"  Shared files: None")
                         is_verified = auth_manager.is_peer_verified(peer_id)
                         print(f"  Authentication Status: {'✓ Verified' if is_verified else '✗ Not Verified'}")
                         if is_verified:
@@ -40,38 +48,105 @@ async def handle_user_input(service, file_transfer, auth_manager):
                                 print(f"  Session Key: {session_key.hex()[:16]}...")
                         
             elif command == "2":
-                files = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "\nEnter comma-separated list of files to share: "
+                print("\nEnter files to share:")
+                print("1. Share existing files")
+                print("2. Create and share a new file")
+                
+                share_option = await asyncio.get_event_loop().run_in_executor(
+                    None, input, "\nEnter option (1-2): "
                 )
-                file_list = [f.strip() for f in files.split(",")]
-                service.update_files(file_list)
+                
+                if share_option == "1":
+                    files = await asyncio.get_event_loop().run_in_executor(
+                        None, input, "\nEnter comma-separated list of files to share: "
+                    )
+                    file_list = [f.strip() for f in files.split(",")]
+                    
+                elif share_option == "2":
+                    file_name = await asyncio.get_event_loop().run_in_executor(
+                        None, input, "\nEnter file name to create: "
+                    )
+                    file_content = await asyncio.get_event_loop().run_in_executor(
+                        None, input, "Enter content for the file: "
+                    )
+                    
+                    # Ensure Files directory exists
+                    os.makedirs("Files", exist_ok=True)
+                    
+                    # Write the file
+                    file_path = os.path.join("Files", file_name)
+                    with open(file_path, 'w') as f:
+                        f.write(file_content)
+                        
+                    print(f"\nCreated file {file_path}")
+                    file_list = [file_name]
+                else:
+                    print("Invalid option")
+                    continue
+                
+                # Update shared files
+                await service.update_files(file_list)
                 print(f"\nUpdated shared files: {file_list}")
                 
+                # Force a service update to broadcast the file list
+                try:
+                    await service.discovery.update_service_info()
+                except Exception as e:
+                    print(f"Error updating service info: {e}")
+                
             elif command == "3":
+                # Refresh peer info silently
+                await service.discovery.refresh_peers_info()
+                
                 peers = service.discovery.get_peers()
                 if not peers:
                     print("\nNo peers available to request files from.")
                     continue
                     
                 print("\nAvailable peers:")
-                for peer_id, data in peers.items():
-                    print(f"- {peer_id} ({data['address']})")
-                    
-                peer_id = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "\nEnter peer ID: "
-                )
-                file_name = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Enter file name to request: "
-                )
+                available_peer_ids = list(peers.keys())
+                for i, peer_id in enumerate(available_peer_ids, 1):
+                    data = peers[peer_id]
+                    print(f"{i}. {peer_id} ({data['address']})")
+                    if 'files' in data:
+                        print(f"   Available files: {data['files']}")
+                    else:
+                        print("   No files advertised")
                 
                 try:
-                    success = await file_transfer.request_file(peer_id, file_name)
-                    if success:
-                        print(f"\n✓ File successfully received from {peer_id}")
-                    else:
-                        print(f"\n✗ Failed to receive file from {peer_id}")
-                except Exception as e:
-                    print(f"\n✗ Error requesting file: {e}")
+                    peer_choice = await asyncio.get_event_loop().run_in_executor(
+                        None, input, "\nEnter peer number (or full peer ID): "
+                    )
+                    
+                    # Check if the input is a number
+                    try:
+                        peer_idx = int(peer_choice) - 1
+                        if 0 <= peer_idx < len(available_peer_ids):
+                            peer_id = available_peer_ids[peer_idx]
+                        else:
+                            print("Invalid peer number")
+                            continue
+                    except ValueError:
+                        # Input is not a number, treat as a service name
+                        peer_id = peer_choice
+                        if peer_id not in peers:
+                            print(f"Peer {peer_id} not found in the list of available peers")
+                            continue
+                    
+                    file_name = await asyncio.get_event_loop().run_in_executor(
+                        None, input, "Enter file name to request: "
+                    )
+                    
+                    try:
+                        success = await file_transfer.request_file(peer_id, file_name)
+                        if success:
+                            print(f"\n✓ File successfully received from {peer_id}")
+                        else:
+                            print(f"\n✗ Failed to receive file from {peer_id}")
+                    except Exception as e:
+                        print(f"\n✗ Error requesting file: {e}")
+                except ValueError:
+                    print("Invalid input")
                     
             elif command == "4":
                 peers = service.discovery.get_peers()
@@ -80,24 +155,61 @@ async def handle_user_input(service, file_transfer, auth_manager):
                     continue
                     
                 print("\nAvailable peers:")
-                for peer_id, data in peers.items():
-                    print(f"- {peer_id} ({data['address']})")
-                    
-                peer_id = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "\nEnter peer ID: "
-                )
-                file_name = await asyncio.get_event_loop().run_in_executor(
-                    None, input, "Enter file name to send: "
-                )
+                available_peer_ids = list(peers.keys())
+                for i, peer_id in enumerate(available_peer_ids, 1):
+                    data = peers[peer_id]
+                    print(f"{i}. {peer_id} ({data['address']})")
                 
                 try:
-                    success = await file_transfer.send_file(peer_id, file_name)
-                    if success:
-                        print(f"\n✓ File successfully sent to {peer_id}")
-                    else:
-                        print(f"\n✗ Failed to send file to {peer_id}")
-                except Exception as e:
-                    print(f"\n✗ Error sending file: {e}")
+                    peer_choice = await asyncio.get_event_loop().run_in_executor(
+                        None, input, "\nEnter peer number (or full peer ID): "
+                    )
+                    
+                    # Check if the input is a number
+                    try:
+                        peer_idx = int(peer_choice) - 1
+                        if 0 <= peer_idx < len(available_peer_ids):
+                            peer_id = available_peer_ids[peer_idx]
+                        else:
+                            print("Invalid peer number")
+                            continue
+                    except ValueError:
+                        # Input is not a number, treat as a service name
+                        peer_id = peer_choice
+                        if peer_id not in peers:
+                            print(f"Peer {peer_id} not found in the list of available peers")
+                            continue
+                    
+                    # Show available files in Files directory
+                    try:
+                        files_dir = "Files"
+                        if os.path.exists(files_dir) and os.path.isdir(files_dir):
+                            files = os.listdir(files_dir)
+                            if files:
+                                print("\nAvailable files in Files directory:")
+                                for i, file_name in enumerate(files, 1):
+                                    print(f"{i}. {file_name}")
+                            else:
+                                print("\nNo files available in Files directory.")
+                        else:
+                            print("\nFiles directory does not exist.")
+                    except Exception as e:
+                        print(f"Error listing files: {e}")
+                    
+                    file_name = await asyncio.get_event_loop().run_in_executor(
+                        None, input, "Enter file name to send: "
+                    )
+                    
+                    try:
+                        success = await file_transfer.send_file(peer_id, file_name)
+                        if success:
+                            print(f"\n✓ File successfully sent to {peer_id}")
+                        else:
+                            print(f"\n✗ Failed to send file to {peer_id}")
+                    except Exception as e:
+                        print(f"\n✗ Error sending file: {e}")
+                except ValueError:
+                    print("Invalid input")
                     
             elif command == "5":
                 print("\nCurrent Session Keys:")
@@ -153,6 +265,12 @@ async def handle_user_input(service, file_transfer, auth_manager):
                     print("Invalid input")
                     
             elif command == "7":
+                print("\nRefreshing peer information...")
+                await service.discovery.refresh_peers_info()
+                peers = service.discovery.get_peers()
+                print(f"Found {len(peers)} peers")
+                
+            elif command == "8":
                 print("\nShutting down...")
                 await service.stop()
                 await file_transfer.stop()

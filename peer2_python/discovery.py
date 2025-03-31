@@ -107,11 +107,31 @@ class PeerDiscovery:
                 if name != self.service_name:
                     # Get network port from service info, fallback to discovery port if not found
                     network_port = int(info.properties.get(b"network_port", info.port))
-                    self.peers[name] = {
+                    
+                    # Create or update peer data
+                    peer_data = self.peers.get(name, {})
+                    old_files = peer_data.get("files", []) if "files" in peer_data else []
+                    
+                    # Update connection information
+                    peer_data.update({
                         "address": socket.inet_ntoa(info.addresses[0]),
                         "port": network_port,  # Store network port as the main port
                         "discovery_port": info.port  # Store discovery port separately
-                    }
+                    })
+                    
+                    # Extract files property if available
+                    if b"files" in info.properties:
+                        try:
+                            files_json = info.properties[b"files"].decode('utf-8')
+                            new_files = json.loads(files_json)
+                            
+                            # Silently update files without any announcement
+                            peer_data["files"] = new_files
+                        except Exception as e:
+                            print(f"Error parsing files from peer {name}: {e}")
+                    
+                    # Store the updated peer information
+                    self.peers[name] = peer_data
                     
                     if self.peer_callback:
                         # Handle both sync and async callbacks
@@ -140,9 +160,38 @@ class PeerDiscovery:
     async def update_files(self, files: list):
         """Update list of available files"""
         if self.info:
-            self.info.properties[b"files"] = json.dumps(files).encode('utf-8')
+            # Clone the current properties dictionary
+            properties = dict(self.info.properties)
+            
+            # Update the files property
+            properties[b"files"] = json.dumps(files).encode('utf-8')
+            
+            # Get local IP address
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            
+            # Create a fresh ServiceInfo object
+            server = self.info.server
+            updated_info = ServiceInfo(
+                "_peer._tcp.local.",
+                self.service_name,
+                addresses=[socket.inet_aton(local_ip)],
+                port=self.port,
+                properties=properties,
+                server=server
+            )
+            
+            # Replace the current service info
+            self.info = updated_info
+            
             if self.zeroconf:
-                await self.zeroconf.async_update_service(self.info)
+                try:
+                    # Update the service with the new service info
+                    await self.zeroconf.async_update_service(updated_info)
+                except Exception as e:
+                    print(f"Error updating service with files: {e}")
 
     async def update_service_info(self):
         """Update the service information with the current network port"""
@@ -160,25 +209,48 @@ class PeerDiscovery:
             # Get the server name from the original service info
             server = self.info.server
             
-            # Create updated service info with the current network port
+            # Preserve all existing properties
+            properties = dict(self.info.properties)
+            
+            # Update with the latest network information
+            properties.update({
+                b"address": local_ip.encode('utf-8'),
+                b"discovery_port": str(self.port).encode('utf-8'),
+                b"network_port": str(self.network_port).encode('utf-8')
+            })
+            
+            # Create updated service info with the current network port and preserved properties
             updated_info = ServiceInfo(
                 "_peer._tcp.local.",
                 self.service_name,
                 addresses=[socket.inet_aton(local_ip)],
                 port=self.port,
-                properties={
-                    b"address": local_ip.encode('utf-8'),
-                    b"discovery_port": str(self.port).encode('utf-8'),
-                    b"network_port": str(self.network_port).encode('utf-8')
-                },
+                properties=properties,
                 server=server  # Add the server parameter
             )
             
             # Update the service
             await self.zeroconf.async_update_service(updated_info)
             self.info = updated_info
+            
             print(f"Updated service info with network port {self.network_port}")
             return True
         except Exception as e:
             print(f"Error updating service info: {e}")
             return False
+
+    async def refresh_peers_info(self):
+        """Refresh information for all known peers"""
+        for name in list(self.peers.keys()):
+            if name != self.service_name:
+                try:
+                    info = await self.zeroconf.async_get_service_info(
+                        "_peer._tcp.local.", 
+                        name
+                    )
+                    if info:
+                        # Process the updated peer info
+                        await self._handle_new_peer(name)
+                except Exception as e:
+                    # Silent error handling for peer refresh failures
+                    pass

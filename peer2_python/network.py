@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Optional, Dict, Tuple
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, dh
+from cryptography.hazmat.primitives.asymmetric import ec, padding
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.backends import default_backend
 import os
@@ -111,67 +111,75 @@ class NetworkManager:
         """Handle key exchange request"""
         peer_address = writer.get_extra_info('peername')
         try:
-            # Step 1: Initial RSA key exchange
-            peer_rsa_public_key = data  # Store RSA public key
-            print(f"Received RSA public key from {peer_address}")
+            # Step 1: Initial ECDSA key exchange
+            peer_ecdsa_public_key = data  # Store ECDSA public key
+            print(f"Received ECDSA public key from {peer_address}")
             
-            # Send our RSA public key
+            # Send our ECDSA public key
             our_public_key = self.auth_manager.get_public_key_bytes()
+            print(f"Sending our ECDSA public key ({len(our_public_key)} bytes)")
             writer.write(b'K')  # Key exchange response
             writer.write(len(our_public_key).to_bytes(4, 'big'))
             writer.write(our_public_key)
             await writer.drain()
             
-            # Step 2: DH Key Exchange
-            # Generate DH parameters and public value
-            parameters = dh.generate_parameters(generator=2, key_size=2048, backend=default_backend())
-            private_key = parameters.generate_private_key()
+            # Step 2: ECDH Key Exchange
+            # Generate ephemeral ECDH key pair
+            private_key = ec.generate_private_key(
+                curve=ec.SECP256R1(),
+                backend=default_backend()
+            )
             public_key = private_key.public_key()
-            public_numbers = public_key.public_numbers()
             
-            # Send DH parameters first
-            param_numbers = parameters.parameter_numbers()
-            param_data = param_numbers.p.to_bytes(256, 'big') + param_numbers.g.to_bytes(4, 'big')
-            writer.write(b'P')  # DH parameters
-            writer.write(len(param_data).to_bytes(4, 'big'))
-            writer.write(param_data)
+            # Send our ECDH public key
+            public_key_bytes = public_key.public_bytes(
+                encoding=serialization.Encoding.X962,
+                format=serialization.PublicFormat.UncompressedPoint
+            )
+            print(f"Generated ephemeral ECDH key pair")
+            
+            # Sign our ECDH public key
+            ecdh_signature = self.auth_manager.sign_dh_params(public_key_bytes)
+            print(f"Signed ECDH public key with ECDSA")
+            
+            # Send ECDH public key and signature
+            print(f"Sending ECDH public key ({len(public_key_bytes)} bytes) and signature ({len(ecdh_signature)} bytes)")
+            writer.write(b'D')  # ECDH key
+            writer.write(len(public_key_bytes).to_bytes(4, 'big'))
+            writer.write(public_key_bytes)
+            writer.write(len(ecdh_signature).to_bytes(4, 'big'))
+            writer.write(ecdh_signature)
             await writer.drain()
             
-            # Sign our DH public value
-            dh_signature = self.auth_manager.sign_dh_params(public_numbers.y.to_bytes(256, 'big'))
-            
-            # Send DH public value and signature
-            writer.write(b'D')  # DH params
-            dh_data = public_numbers.y.to_bytes(256, 'big')
-            writer.write(len(dh_data).to_bytes(4, 'big'))
-            writer.write(dh_data)
-            writer.write(len(dh_signature).to_bytes(4, 'big'))
-            writer.write(dh_signature)
-            await writer.drain()
-            
-            # Receive peer's DH value and signature
+            # Receive peer's ECDH value and signature
+            print("Waiting for peer's ECDH key and signature...")
             msg_type = await reader.read(1)
             if msg_type != b'D':
-                print(f"Invalid DH response type from {peer_address}: {msg_type}")
+                print(f"Invalid ECDH response type from {peer_address}: {msg_type}")
                 return
                 
-            dh_len = int.from_bytes(await reader.read(4), 'big')
-            peer_dh_value = await reader.read(dh_len)
+            ecdh_len = int.from_bytes(await reader.read(4), 'big')
+            peer_ecdh_value = await reader.read(ecdh_len)
             sig_len = int.from_bytes(await reader.read(4), 'big')
             peer_signature = await reader.read(sig_len)
+            print(f"Received peer's ECDH key ({ecdh_len} bytes) and signature ({sig_len} bytes)")
             
-            # Verify peer's DH value signature using their RSA key
-            if not self.auth_manager.verify_dh_params(peer_dh_value, peer_signature, peer_rsa_public_key):
-                print(f"Failed to verify peer's DH parameters")
+            # Verify peer's ECDH value signature using their ECDSA key
+            if not self.auth_manager.verify_dh_params(peer_ecdh_value, peer_signature, peer_ecdsa_public_key):
+                print(f"Failed to verify peer's ECDH parameters")
                 return
             
-            # Generate shared secret
-            peer_public_numbers = dh.DHPublicNumbers(
-                int.from_bytes(peer_dh_value, 'big'),
-                parameters.parameter_numbers()
-            )
-            peer_dh_public_key = peer_public_numbers.public_key(default_backend())
-            shared_secret = private_key.exchange(peer_dh_public_key)
+            # Generate shared secret using ECDH
+            try:
+                peer_public_key = ec.EllipticCurvePublicKey.from_encoded_point(
+                    curve=ec.SECP256R1(),
+                    data=peer_ecdh_value
+                )
+                shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
+                print(f"Generated shared secret ({len(shared_secret)} bytes)")
+            except Exception as e:
+                print(f"Error during ECDH key exchange: {e}")
+                return
             
             # Derive session key using HKDF
             session_key = HKDF(
@@ -181,6 +189,7 @@ class NetworkManager:
                 info=b'file_transfer',
                 backend=default_backend()
             ).derive(shared_secret)
+            print(f"Derived session key ({len(session_key)} bytes)")
             
             # Find the peer's service name from the discovery service
             peer_service_name = None
@@ -196,8 +205,8 @@ class NetworkManager:
             print(f"DEBUG - Discovered peers: {list(self.discovery.get_peers().keys())}")
             
             if peer_service_name:
-                # Add peer to verified peers using service name and RSA public key
-                self.auth_manager.add_verified_peer(peer_service_name, peer_rsa_public_key, session_key)
+                # Add peer to verified peers using service name and ECDSA public key
+                self.auth_manager.add_verified_peer(peer_service_name, peer_ecdsa_public_key, session_key)
                 print(f"Successfully established secure channel with {peer_address}")
                 
                 # If service_name is None, try to get it now
@@ -232,6 +241,13 @@ class NetworkManager:
             print(f"Error handling key exchange with {peer_address}: {e}")
             import traceback
             traceback.print_exc()
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+                print(f"Connection closed with {peer_address}")
+            except Exception as e:
+                print(f"Error closing connection with {peer_address}: {e}")
             
     async def _handle_verification_challenge(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, data: bytes):
         """Handle verification challenge from peer"""
@@ -279,77 +295,80 @@ class NetworkManager:
             print(f"Connected to peer at {peer_addr}")
             
             try:
-                # Step 1: Send our RSA public key
+                # Step 1: Send our ECDSA public key
                 our_public_key = self.auth_manager.get_public_key_bytes()
+                print(f"Sending our ECDSA public key ({len(our_public_key)} bytes)")
                 writer.write(b'K')  # Key exchange
                 writer.write(len(our_public_key).to_bytes(4, 'big'))
                 writer.write(our_public_key)
                 await writer.drain()
                 
-                # Wait for peer's RSA public key
+                # Wait for peer's ECDSA public key
                 response_type = await reader.read(1)
                 if response_type != b'K':
                     print(f"Invalid response type during key exchange: {response_type}")
                     return None
                     
                 response_len = int.from_bytes(await reader.read(4), 'big')
-                peer_rsa_public_key = await reader.read(response_len)
-                print("Received peer's RSA public key")
+                peer_ecdsa_public_key = await reader.read(response_len)
+                print("Received peer's ECDSA public key")
                 
-                # Wait for peer's DH parameters
-                param_type = await reader.read(1)
-                if param_type != b'P':
-                    print(f"Invalid DH parameters type: {param_type}")
-                    return None
-                    
-                param_len = int.from_bytes(await reader.read(4), 'big')
-                param_data = await reader.read(param_len)
-                
-                # Extract DH parameters
-                p = int.from_bytes(param_data[:256], 'big')
-                g = int.from_bytes(param_data[256:], 'big')
-                parameters = dh.DHParameterNumbers(p, g).parameters(default_backend())
-                
-                # Generate our private key using the same parameters
-                private_key = parameters.generate_private_key()
+                # Generate our ephemeral ECDH key pair
+                private_key = ec.generate_private_key(
+                    curve=ec.SECP256R1(),
+                    backend=default_backend()
+                )
                 public_key = private_key.public_key()
-                public_numbers = public_key.public_numbers()
                 
-                # Sign our DH public value
-                dh_data = public_numbers.y.to_bytes(256, 'big')
-                dh_signature = self.auth_manager.sign_dh_params(dh_data)
+                # Send our ECDH public key
+                public_key_bytes = public_key.public_bytes(
+                    encoding=serialization.Encoding.X962,
+                    format=serialization.PublicFormat.UncompressedPoint
+                )
+                print(f"Generated ephemeral ECDH key pair")
                 
-                # Send DH public value and signature
-                writer.write(b'D')  # DH params
-                writer.write(len(dh_data).to_bytes(4, 'big'))
-                writer.write(dh_data)
-                writer.write(len(dh_signature).to_bytes(4, 'big'))
-                writer.write(dh_signature)
+                # Sign our ECDH public key
+                ecdh_signature = self.auth_manager.sign_dh_params(public_key_bytes)
+                print(f"Signed ECDH public key with ECDSA")
+                
+                # Send ECDH public key and signature
+                print(f"Sending ECDH public key ({len(public_key_bytes)} bytes) and signature ({len(ecdh_signature)} bytes)")
+                writer.write(b'D')  # ECDH key
+                writer.write(len(public_key_bytes).to_bytes(4, 'big'))
+                writer.write(public_key_bytes)
+                writer.write(len(ecdh_signature).to_bytes(4, 'big'))
+                writer.write(ecdh_signature)
                 await writer.drain()
                 
-                # Receive peer's DH value and signature
+                # Receive peer's ECDH value and signature
+                print("Waiting for peer's ECDH key and signature...")
                 msg_type = await reader.read(1)
                 if msg_type != b'D':
-                    print(f"Invalid DH response type: {msg_type}")
+                    print(f"Invalid ECDH response type: {msg_type}")
                     return None
                     
-                dh_len = int.from_bytes(await reader.read(4), 'big')
-                peer_dh_value = await reader.read(dh_len)
+                ecdh_len = int.from_bytes(await reader.read(4), 'big')
+                peer_ecdh_value = await reader.read(ecdh_len)
                 sig_len = int.from_bytes(await reader.read(4), 'big')
                 peer_signature = await reader.read(sig_len)
+                print(f"Received peer's ECDH key ({ecdh_len} bytes) and signature ({sig_len} bytes)")
                 
-                # Verify peer's DH value signature
-                if not self.auth_manager.verify_dh_params(peer_dh_value, peer_signature, peer_rsa_public_key):
-                    print("Failed to verify peer's DH parameters")
+                # Verify peer's ECDH value signature
+                if not self.auth_manager.verify_dh_params(peer_ecdh_value, peer_signature, peer_ecdsa_public_key):
+                    print("Failed to verify peer's ECDH parameters")
                     return None
                 
-                # Generate shared secret
-                peer_public_numbers = dh.DHPublicNumbers(
-                    int.from_bytes(peer_dh_value, 'big'),
-                    parameters.parameter_numbers()
-                )
-                peer_dh_public_key = peer_public_numbers.public_key(default_backend())
-                shared_secret = private_key.exchange(peer_dh_public_key)
+                # Generate shared secret using ECDH
+                try:
+                    peer_public_key = ec.EllipticCurvePublicKey.from_encoded_point(
+                        curve=ec.SECP256R1(),
+                        data=peer_ecdh_value
+                    )
+                    shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
+                    print(f"Generated shared secret ({len(shared_secret)} bytes)")
+                except Exception as e:
+                    print(f"Error during ECDH key exchange: {e}")
+                    return None
                 
                 # Derive session key using HKDF
                 session_key = HKDF(
@@ -359,6 +378,7 @@ class NetworkManager:
                     info=b'file_transfer',
                     backend=default_backend()
                 ).derive(shared_secret)
+                print(f"Derived session key ({len(session_key)} bytes)")
                 
                 # Debug output
                 print(f"DEBUG - Initiator's service name: {self.service_name}")
@@ -368,45 +388,34 @@ class NetworkManager:
                 # Try to find the peer's service name based on address and port
                 known_peer_name = None
                 for service_name, data in self.discovery.get_peers().items():
-                    if data['address'] == peer_address and int(data['port']) == peer_port:
+                    # Match by IP address only, since we might connect to an ephemeral port
+                    if data['address'] == peer_address:
                         known_peer_name = service_name
                         break
                 
                 print(f"DEBUG - Found peer service name from discovery: {known_peer_name}")
                 
-                # Step 3: Try to receive peer's service name for mutual authentication
-                try:
-                    # Set a timeout for mutual authentication message
-                    mutual_type = await asyncio.wait_for(reader.read(1), timeout=5.0)
-                    print(f"Received message after key exchange: {mutual_type}")
-                    
-                    if mutual_type == b'M':
-                        name_len = int.from_bytes(await reader.read(4), 'big')
-                        peer_service_name_bytes = await reader.read(name_len)
-                        peer_service_name = peer_service_name_bytes.decode('utf-8')
-                        print(f"Received peer's service name: {peer_service_name}")
+                # Step 3: Send our service name for mutual authentication
+                if self.service_name:
+                    print(f"Sending mutual authentication with service name: {self.service_name}")
+                    try:
+                        writer.write(b'M')  # Mutual authentication
+                        service_name_bytes = self.service_name.encode('utf-8')
+                        writer.write(len(service_name_bytes).to_bytes(4, 'big'))
+                        writer.write(service_name_bytes)
+                        await writer.drain()
+                        print("Mutual authentication message sent successfully")
                         
-                        # Add peer to verified peers using received service name
-                        self.auth_manager.add_verified_peer(peer_service_name, peer_rsa_public_key, session_key)
-                        print(f"Mutual authentication successful with {peer_service_name}")
-                        
-                        # Add a small delay to ensure the peer has processed our response
-                        # before we close the connection
-                        await asyncio.sleep(0.5)
-                        
-                        return session_key
-                    elif not mutual_type:
-                        print("Connection closed by peer before mutual authentication")
-                    else:
-                        print(f"Unexpected message type after key exchange: {mutual_type}")
-                except asyncio.TimeoutError:
-                    print("Timeout waiting for mutual authentication message")
+                        # Keep the connection open a bit longer to allow the peer to process
+                        await asyncio.sleep(1.0)
+                    except Exception as e:
+                        print(f"Error sending mutual authentication: {e}")
+                else:
+                    print("ERROR: Could not send mutual authentication - service_name is not set")
                 
-                # If we reach here, we didn't get a valid mutual authentication
-                print("Falling back to using known peer name from discovery service")
                 if known_peer_name:
                     # Add peer to verified peers using discovered service name
-                    self.auth_manager.add_verified_peer(known_peer_name, peer_rsa_public_key, session_key)
+                    self.auth_manager.add_verified_peer(known_peer_name, peer_ecdsa_public_key, session_key)
                     print(f"Successfully established secure channel with {known_peer_name}")
                     return session_key
                 
@@ -454,7 +463,34 @@ class NetworkManager:
     async def send_file_request(self, peer_address: str, peer_port: int, file_name: str, session_key: bytes) -> bool:
         """Send file request to peer"""
         try:
-            reader, writer = await asyncio.open_connection(peer_address, peer_port)
+            if not session_key:
+                print(f"No valid session key for peer at {peer_address}:{peer_port}")
+                return False
+                
+            print(f"Sending file request for '{file_name}' to {peer_address}:{peer_port}")
+            print(f"Using session key: {session_key.hex()[:16]}...")
+                
+            # Try to connect to the peer
+            try:
+                reader, writer = await asyncio.open_connection(peer_address, peer_port)
+                print(f"Connected to peer at {peer_address}:{peer_port}")
+            except ConnectionRefusedError:
+                # If we can't connect to the specified port, try to find the peer by IP only
+                service_name = None
+                network_port = None
+                
+                for name, data in self.discovery.get_peers().items():
+                    if data['address'] == peer_address:
+                        service_name = name
+                        network_port = data['port']
+                        break
+                
+                if network_port and network_port != peer_port:
+                    print(f"Connection refused on port {peer_port}, trying alternate port {network_port}")
+                    reader, writer = await asyncio.open_connection(peer_address, network_port)
+                    print(f"Connected to peer at {peer_address}:{network_port}")
+                else:
+                    raise
             
             # Send file request
             request = {
@@ -463,27 +499,35 @@ class NetworkManager:
             }
             request_data = json.dumps(request).encode('utf-8')
             
+            print(f"Sending file request message ({len(request_data)} bytes)")
             writer.write(b'F')  # File transfer
             writer.write(len(request_data).to_bytes(4, 'big'))
             writer.write(request_data)
             await writer.drain()
             
             # Wait for response
+            print("Waiting for response...")
             response_type = await reader.read(1)
             if response_type != b'F':
-                print("Invalid response type for file request")
+                print(f"Invalid response type for file request: {response_type}")
                 return False
                 
             response_len = int.from_bytes(await reader.read(4), 'big')
+            print(f"Receiving response of {response_len} bytes")
             response_data = await reader.read(response_len)
             response = json.loads(response_data.decode('utf-8'))
             
             if response['status'] == 'ok':
+                # Ensure directory exists
+                os.makedirs("Files", exist_ok=True)
+                
                 # Save the file
                 file_content = base64.b64decode(response['file_content'])
-                with open(f"received_{file_name}", 'wb') as f:
+                file_path = os.path.join("Files", f"received_{file_name}")
+                with open(file_path, 'wb') as f:
                     f.write(file_content)
-                print(f"Successfully received file {file_name}")
+                print(f"Successfully received file {file_name} ({len(file_content)} bytes)")
+                print(f"Saved to {file_path}")
             else:
                 print(f"Failed to receive file: {response['message']}")
             
@@ -494,20 +538,22 @@ class NetworkManager:
             
         except Exception as e:
             print(f"Error sending file request: {e}")
+            import traceback
+            traceback.print_exc()
             return False
             
     async def establish_secure_channel(self, peer_public_key: bytes) -> Optional[bytes]:
-        """Establish a secure channel using DHE-RSA"""
+        """Establish a secure channel using ECDH"""
         try:
-            # Generate DHE parameters
-            parameters = dh.generate_parameters(generator=2, key_size=2048, backend=default_backend())
+            # Generate ECDH parameters
+            parameters = ec.generate_parameters(curve=ec.SECP256R1(), backend=default_backend())
             
             # Generate private key
             private_key = parameters.generate_private_key()
             public_key = private_key.public_key()
             
             # Derive shared secret
-            shared_secret = private_key.exchange(peer_public_key)
+            shared_secret = private_key.exchange(ec.ECDH(), peer_public_key)
             
             # Derive session key using HKDF
             session_key = HKDF(
@@ -526,42 +572,105 @@ class NetworkManager:
             
     async def _handle_file_transfer(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, data: bytes):
         """Handle file transfer request"""
+        peer_address = writer.get_extra_info('peername')
         try:
+            print(f"Received file request from {peer_address}")
             # Parse file request
             request_data = json.loads(data.decode('utf-8'))
             file_name = request_data.get('file_name')
             session_key_hex = request_data.get('session_key')
             
-            if not file_name or not session_key_hex:
-                print("Invalid file request: missing file name or session key")
-                return
-                
-            # Convert session key from hex to bytes
-            session_key = bytes.fromhex(session_key_hex)
+            print(f"File requested: {file_name}")
             
-            # Check if file exists
-            if not os.path.exists(file_name):
-                response = {
-                    'status': 'error',
-                    'message': f'File {file_name} not found'
-                }
-            else:
-                # Read file content
-                with open(file_name, 'rb') as f:
-                    file_content = f.read()
+            # Check if this is a file request or a file being sent
+            if 'file_content' in request_data:
+                # This is a file being sent to us
+                print(f"Receiving file {file_name} from {peer_address}")
+                file_content_b64 = request_data.get('file_content')
+                file_size = request_data.get('file_size')
                 
-                # TODO: Encrypt file content with session key
-                # For now, just send the raw content
-                response = {
-                    'status': 'ok',
-                    'message': f'File {file_name} found',
-                    'file_size': len(file_content),
-                    'file_content': base64.b64encode(file_content).decode('utf-8')
-                }
+                if not file_name or not file_content_b64:
+                    print("Invalid file transfer: missing file name or content")
+                    response = {
+                        'status': 'error',
+                        'message': 'Invalid file transfer request'
+                    }
+                else:
+                    # Ensure Files directory exists
+                    os.makedirs("Files", exist_ok=True)
+                    
+                    # Save the file
+                    file_content = base64.b64decode(file_content_b64)
+                    file_path = os.path.join("Files", f"received_{file_name}")
+                    with open(file_path, 'wb') as f:
+                        f.write(file_content)
+                    
+                    print(f"Received file {file_name} ({len(file_content)} bytes)")
+                    print(f"Saved to {file_path}")
+                    
+                    response = {
+                        'status': 'ok',
+                        'message': f'File {file_name} received successfully'
+                    }
+            else:
+                # This is a file request
+                if not file_name or not session_key_hex:
+                    print("Invalid file request: missing file name or session key")
+                    response = {
+                        'status': 'error',
+                        'message': 'Invalid file request'
+                    }
+                    writer.write(b'F')  # File response
+                    response_data = json.dumps(response).encode('utf-8')
+                    writer.write(len(response_data).to_bytes(4, 'big'))
+                    writer.write(response_data)
+                    await writer.drain()
+                    return
+                    
+                # Convert session key from hex to bytes
+                session_key = bytes.fromhex(session_key_hex)
+                print(f"Session key received: {session_key.hex()[:16]}...")
+                
+                # Check if file exists in Files directory first, then check current directory
+                found = False
+                file_paths = [
+                    os.path.join("Files", file_name),
+                    file_name
+                ]
+                
+                print(f"Searching for file in: {file_paths}")
+                
+                for file_path in file_paths:
+                    if os.path.exists(file_path):
+                        found = True
+                        print(f"File found at: {file_path}")
+                        # Read file content
+                        with open(file_path, 'rb') as f:
+                            file_content = f.read()
+                        
+                        print(f"File size: {len(file_content)} bytes")
+                        # TODO: Encrypt file content with session key
+                        # For now, just send the raw content
+                        response = {
+                            'status': 'ok',
+                            'message': f'File {file_name} found at {file_path}',
+                            'file_size': len(file_content),
+                            'file_content': base64.b64encode(file_content).decode('utf-8')
+                        }
+                        break
+                        
+                if not found:
+                    print(f"File not found: {file_name}")
+                    response = {
+                        'status': 'error',
+                        'message': f'File {file_name} not found'
+                    }
             
             # Send response
-            writer.write(b'F')  # File response
             response_data = json.dumps(response).encode('utf-8')
+            print(f"Sending response ({len(response_data)} bytes) with status: {response['status']}")
+            
+            writer.write(b'F')  # File response
             writer.write(len(response_data).to_bytes(4, 'big'))
             writer.write(response_data)
             await writer.drain()
@@ -570,6 +679,20 @@ class NetworkManager:
             print(f"Error handling file transfer: {e}")
             import traceback
             traceback.print_exc()
+            
+            try:
+                # Send error response
+                response = {
+                    'status': 'error',
+                    'message': f'Internal error: {str(e)}'
+                }
+                response_data = json.dumps(response).encode('utf-8')
+                writer.write(b'F')
+                writer.write(len(response_data).to_bytes(4, 'big'))
+                writer.write(response_data)
+                await writer.drain()
+            except:
+                pass
 
     async def _handle_mutual_authentication(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, data: bytes):
         """Handle mutual authentication request"""

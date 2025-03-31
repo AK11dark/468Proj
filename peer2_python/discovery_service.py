@@ -65,10 +65,10 @@ class DiscoveryService:
         """Get list of discovered peers"""
         return self.discovery.get_peers()
         
-    def update_files(self, files: list):
+    async def update_files(self, files: list):
         """Update list of available files"""
         try:
-            self.discovery.update_files(files)
+            await self.discovery.update_files(files)
         except Exception as e:
             print(f"Error updating files: {e}")
 

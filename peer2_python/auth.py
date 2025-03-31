@@ -7,15 +7,15 @@ import os
 import time
 from typing import Dict, Optional, Tuple
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric import ec, padding
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.backends import default_backend
 
 class AuthManager:
     def __init__(self):
-        # Generate RSA key pair for this peer
-        self.private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
+        # Generate ECDSA key pair for this peer using P-256 curve
+        self.private_key = ec.generate_private_key(
+            curve=ec.SECP256R1(),
             backend=default_backend()
         )
         self.public_key = self.private_key.public_key()
@@ -31,28 +31,20 @@ class AuthManager:
         )
         
     def sign_dh_params(self, dh_params: bytes) -> bytes:
-        """Sign DH parameters with our RSA private key"""
+        """Sign DH parameters with our ECDSA private key"""
         return self.private_key.sign(
             dh_params,
-            padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH
-            ),
-            hashes.SHA256()
+            ec.ECDSA(hashes.SHA256())
         )
         
     def verify_dh_params(self, dh_params: bytes, signature: bytes, peer_public_key: bytes) -> bool:
-        """Verify DH parameters using peer's RSA public key"""
+        """Verify DH parameters using peer's ECDSA public key"""
         try:
             public_key = serialization.load_der_public_key(peer_public_key, backend=default_backend())
             public_key.verify(
                 signature,
                 dh_params,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=padding.PSS.MAX_LENGTH
-                ),
-                hashes.SHA256()
+                ec.ECDSA(hashes.SHA256())
             )
             return True
         except Exception as e:
