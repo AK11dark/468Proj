@@ -1,41 +1,35 @@
 require 'socket'
 require 'json'
 
-# Load peer info from JSON
-peer_info = JSON.parse(File.read('peers.json'))["bob"]
-ip = peer_info["ip"]
-port = peer_info["port"]
+peers = JSON.parse(File.read("peers.json"))
 
-filename = "example.txt"
-output_file = "received_from_python.txt"
+puts "running"
 
-# Connect to the server
-socket = TCPSocket.new(ip, port)
-puts "Connected to #{ip}:#{port}"
+peers.each do |peer|
+  #next if peer["name"] == "peer1-ruby"
 
-# Send file request
-request = {
-  type: "file_request",
-  filename: filename,
-  from: "ruby-client"
-}
-socket.puts(request.to_json)
+  begin
+    puts "\n📡 Connecting to #{peer["name"]} at #{peer["host"]}:#{peer["port"]}"
 
-# Get response
-response_line = socket.gets
-response = JSON.parse(response_line)
-puts "Response: #{response["status"]}"
+    socket = TCPSocket.new(peer["host"], peer["port"])
+    socket.puts "LIST"
+    response = socket.gets
+    files = JSON.parse(response)
+    puts "Available files: #{files}"
 
-# If accepted, receive the file
-if response["status"] == "accepted"
-  File.open(output_file, "wb") do |f|
-    while chunk = socket.read(1024)
-      f.write(chunk)
+    file_to_get = files.first
+    if file_to_get
+      puts "⬇️  Requesting file: #{file_to_get}"
+      socket = TCPSocket.new(peer["host"], peer["port"])
+      socket.puts "GET #{file_to_get}"
+      size = socket.gets.to_i
+      content = socket.read(size)
+      File.write("downloads/#{file_to_get}", content)
+      puts "✅ Saved to downloads/#{file_to_get}"
     end
-  end
-  puts "File saved to #{output_file}"
-else
-  puts "Request denied by server."
-end
 
-socket.close
+    socket.close
+  rescue => e
+    puts "❌ Failed to connect: #{e.message}"
+  end
+end

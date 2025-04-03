@@ -3,9 +3,9 @@ const fs = require('fs');
 
 const results = [];
 
-console.log("🔍 Discovering _p2p._tcp services...");
+console.log("🔍 Discovering _peer._tcp services...");
 
-const browser = bonjour.find({ type: 'p2p' }, service => {
+const browser = bonjour.find({ type: 'peer' }, service => {
   const peer = {
     name: service.name,
     host: service.referer.address,
@@ -15,9 +15,8 @@ const browser = bonjour.find({ type: 'p2p' }, service => {
   results.push(peer);
 });
 
-// Save to peers.json after 3 seconds
 setTimeout(() => {
-fs.writeFileSync('../peer1_logan/peers.json', JSON.stringify(results, null, 2));
+  fs.writeFileSync('../peer1_logan/peers.json', JSON.stringify(results, null, 2));
   console.log("✅ Wrote peers to peers.json");
   process.exit();
 }, 3000);
