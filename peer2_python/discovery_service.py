@@ -65,12 +65,53 @@ class DiscoveryService:
         """Get list of discovered peers"""
         return self.discovery.get_peers()
         
+    def get_service_name(self) -> str:
+        """Get the service name of this peer"""
+        return self.discovery.service_name
+        
     async def update_files(self, files: list):
         """Update list of available files"""
         try:
             await self.discovery.update_files(files)
         except Exception as e:
             print(f"Error updating files: {e}")
+            
+    async def refresh_peers_info(self):
+        """Refresh information for all known peers"""
+        try:
+            await self.discovery.refresh_peers_info()
+        except Exception as e:
+            print(f"Error refreshing peer information: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    async def update_service_info(self):
+        """Update the service information with the current network port"""
+        try:
+            success = await self.discovery.update_service_info()
+            if not success:
+                print("Failed to update service information")
+            return success
+        except Exception as e:
+            print(f"Error updating service information: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def find_peer_by_address(self, ip_address: str) -> str:
+        """Find a peer's service name by IP address
+        
+        Args:
+            ip_address: The IP address to search for
+            
+        Returns:
+            The service name of the peer with the matching IP address, or None if not found
+        """
+        for service_name, data in self.get_peers().items():
+            # Match by IP address only, since port might be different
+            if data['address'] == ip_address:
+                return service_name
+        return None
 
     async def run(self):
         """Run the discovery service"""

@@ -1,19 +1,5 @@
-plan!
-# Correct DHE-RSA flow should be:
+Project uses ECDH for Key exchange and ECDSA.
 
-1. Initial Connection (what we have now):
-   - Exchange RSA public keys for identity verification
-
-2. DH Key Exchange:
-   - Generate DH parameters and public value
-   - Sign DH public value with our RSA private key
-   - Send both DH public value and signature to peer
-   - Verify peer's DH value using their RSA public key
-   - Generate shared secret using DH
-
-3. Verification:
-   - Use the DH shared secret for secure communication
-   - Use RSA signatures only for verifying DH parameters
 **Queen’s University**  
 **School of Computing**  
 
