@@ -275,7 +275,7 @@ async def handle_user_input(service, file_transfer, auth_manager):
 
 async def main():
     """Main entry point for the peer-to-peer file sharing application"""
-    print("\n=== P2P File Sharing with DHE-RSA Authentication ===\n")
+    print("\n=== P2P File Sharing with ECDH-ECDSA Authentication ===\n")
     
     # Initialize services with zero configuration for ports
     discovery_port = 5000  # Keep discovery port fixed for now

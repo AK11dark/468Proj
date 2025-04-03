@@ -105,18 +105,50 @@ class PeerDiscovery:
             if info:
                 # Only add if not our own service
                 if name != self.service_name:
-                    # Get network port from service info, fallback to discovery port if not found
-                    network_port = int(info.properties.get(b"network_port", info.port))
+                    # Extract address from the service info
+                    address = socket.inet_ntoa(info.addresses[0]) if info.addresses else None
+                    
+                    # Get discovery port (the one in the SRV record)
+                    discovery_port = info.port
                     
                     # Create or update peer data
                     peer_data = self.peers.get(name, {})
                     old_files = peer_data.get("files", []) if "files" in peer_data else []
                     
+                    # Default network port to discovery port
+                    network_port = discovery_port
+                    
+                    # Try to get network_port from properties
+                    if b"network_port" in info.properties:
+                        try:
+                            network_port = int(info.properties[b"network_port"].decode('utf-8'))
+                        except (ValueError, AttributeError):
+                            # If decoding fails, try alternative methods for Ruby-generated properties
+                            pass
+                    
+                    # Ruby services might include the port in TXT records differently
+                    # Handle case where the TXT record might have a direct string representation
+                    txt_records = {}
+                    for key, value in info.properties.items():
+                        if isinstance(value, bytes):
+                            try:
+                                txt_records[key.decode('utf-8') if isinstance(key, bytes) else key] = value.decode('utf-8')
+                            except:
+                                # Skip if we can't decode it
+                                pass
+                    
+                    # Try to get network_port from txt_records if it wasn't found yet
+                    if "network_port" in txt_records:
+                        try:
+                            network_port = int(txt_records["network_port"])
+                        except ValueError:
+                            pass
+                            
                     # Update connection information
                     peer_data.update({
-                        "address": socket.inet_ntoa(info.addresses[0]),
+                        "address": address,
                         "port": network_port,  # Store network port as the main port
-                        "discovery_port": info.port  # Store discovery port separately
+                        "discovery_port": discovery_port  # Store discovery port separately
                     })
                     
                     # Extract files property if available
