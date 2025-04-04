@@ -3,7 +3,7 @@ import json
 import os
 
 # Function to start the Python file server
-def start_file_server(host='0.0.0.0', port=5002):  # Change port to 5002
+def start_file_server(host='0.0.0.0', port=5003):  # Change port to 5002
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((host, port))
     server.listen(5)
@@ -57,4 +57,4 @@ def start_file_server(host='0.0.0.0', port=5002):  # Change port to 5002
 
 # To start the server, call the function:
 if __name__ == "__main__":
-    start_file_server(host='0.0.0.0', port=5002)  # Use a different port for Python
+    start_file_server(host='0.0.0.0', port=5003)  # Use a different port for Python
