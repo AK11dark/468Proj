@@ -22,7 +22,8 @@ loop do
   puts "\nMenu:"
   puts "1. Discover peers"
   puts "2. Request File"
-  puts "3. Exit"
+  puts "3. Perform Key Exchange"
+  puts "0. Exit"
   print "> "
 
   choice = gets.chomp
@@ -65,6 +66,30 @@ loop do
       end
     end
   when "3"
+    peers = PeerFinder.discover_peers(5)
+    if peers.empty?
+      puts "\n⚠️ No peers found."
+    else
+      puts "\nChoose a peer to request from:"
+      peers.each_with_index do |peer, i|
+        puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
+      end
+
+      print "\nEnter the peer number to request from: "
+      peer_number = gets.chomp.to_i - 1
+
+      if peer_number >= 0 && peer_number < peers.length
+        selected_peer = peers[peer_number]
+        # Print the selected peer info and requested filename
+        puts "#{selected_peer[:ip]} #{selected_peer[:port]} #{filename}"
+
+        perform_key_exchange(selected_peer[:ip], selected_peer[:port])
+      else
+        puts "Invalid selection."
+      end
+    end
+    
+  when "0"
     puts "\n👋 Exiting."
     exit
   else

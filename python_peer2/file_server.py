@@ -50,33 +50,41 @@ def start_file_server(host='0.0.0.0', port=5003):
                     print(f"[Python File Server] ❌ File not found: {file_name}")
 
             elif msg_type == b"K":  # ECDH Key Exchange (just print for now)
-                        # Step 1: Read payload
                 key_len = int.from_bytes(client_socket.recv(4), 'big')
                 payload = client_socket.recv(key_len)
                 data = json.loads(payload.decode("utf-8"))
 
                 pem = data.get("public_key").encode()
 
-                # Step 2: Load Ruby's public key
                 peer_public_key = serialization.load_pem_public_key(pem)
 
                 # Step 3: Generate our private key
                 private_key = ec.generate_private_key(ec.SECP256R1())
                 public_key = private_key.public_key()
-
+ 
                 # Step 4: Derive shared secret
                 shared_key = private_key.exchange(ec.ECDH(), peer_public_key)
+                print(f"[Python] 🔐 Raw shared secret: {shared_key.hex()}")
 
-                # Step 5: HKDF (Optional - recommended)
+                # Step 5: Derive final key using HKDF (Optional)
                 derived_key = HKDF(
                     algorithm=hashes.SHA256(),
                     length=32,
                     salt=None,
                     info=b'p2p-key-exchange',
                 ).derive(shared_key)
-                
+                print(f"[Python] 🧪 Final derived key (HKDF): {derived_key.hex()}")
              
-                print(f"[Python] 🔐 Shared key derived: {derived_key.hex()[:16]}...")
+
+                # Step 6: Send our public key back
+                public_bytes = public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+                client_socket.send(len(public_bytes).to_bytes(4, 'big'))
+                client_socket.send(public_bytes)
+                print("[Python] 📤 Sent PEM public key to Ruby peer")
+
             else:
                 print(f"[Python File Server] ❓ Unknown message type: {msg_type}")
 
