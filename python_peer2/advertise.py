@@ -10,7 +10,7 @@ def get_local_ip():
     s.close()
     return ip
 
-def advertise_service(name="python-peer", port=5001):
+def advertise_service(name="python-peer", port=5002):
     global zeroconf_instance
     ip = get_local_ip()
     desc = {

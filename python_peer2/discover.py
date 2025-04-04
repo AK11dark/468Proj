@@ -2,21 +2,6 @@ import socket
 import time
 from zeroconf import Zeroconf, ServiceBrowser, ServiceListener
 
-class PeerListener(ServiceListener):
-    def __init__(self):
-        self.peers = []
-
-    def add_service(self, zeroconf, service_type, name):
-        info = zeroconf.get_service_info(service_type, name)
-        if info and info.addresses:
-            ip = socket.inet_ntoa(info.addresses[0])
-            port = info.port
-            print(f"➡️ Discovered: {name} at {ip}:{port}")
-            self.peers.append({
-                "name": name,
-                "ip": ip,
-                "port": port
-            })
 
 class PeerListener(ServiceListener):
     def __init__(self):

@@ -37,6 +37,7 @@ module PeerFinder
 
           if ip && port
             discovered_peers[name] = { name: name, ip: ip, port: port }
+            
           end
         end
       end

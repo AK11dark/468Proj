@@ -2,11 +2,13 @@ from advertise import advertise_service, stop_advertisement
 from discover import discover_peers
 from client import request_file
 from client import test_ping
+from file_server import start_file_server
+import subprocess
 
 def main():
     print("🔁 Starting P2P Python Client")
     service_name = advertise_service()
-
+    subprocess.Popen(["python3", "file_server.py"])
     while True:
         print("\nMenu:")
         print("1. Find peers")
