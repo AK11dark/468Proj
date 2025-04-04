@@ -1,50 +1,42 @@
+# file_request.py
 import socket
 import json
 import os
 
-def send_file_request(ip, port, file_name, is_sending):
-    sock = socket.create_connection((ip, port))
-    try:
+def test_ping(ip, port):
+    with socket.create_connection((ip, port)) as sock:
+        sock.send(b"PING")
+        print(f"✅ Sent 'PING' to {ip}:{port}")
+
+def request_file(ip, port, filename):
+    os.makedirs("Received", exist_ok=True)
+
+    with socket.create_connection((ip, port)) as sock:
         request = {
-            "file_name": file_name,
-            "is_sending": is_sending
+            "file_name": filename,
         }
-        request_json = json.dumps(request).encode('utf-8')
-
-        # Send message type and payload
+        request_bytes = json.dumps(request).encode("utf-8")
         sock.send(b"F")
-        sock.send(len(request_json).to_bytes(4, 'big'))
-        sock.send(request_json)
+        sock.send(len(request_bytes).to_bytes(4, 'big'))
+        sock.send(request_bytes)
 
-        # Read response
         resp_type = sock.recv(1)
+        if resp_type != b"F":
+            print("❌ Unexpected response type")
+            return
+
         resp_len = int.from_bytes(sock.recv(4), 'big')
         resp = json.loads(sock.recv(resp_len).decode())
 
-        if resp.get("status") == "accepted":
-            if is_sending:
-                with open(f"Files/{file_name}", 'rb') as f:
-                    content = f.read()
-                sock.send(b"D")
-                sock.send(len(content).to_bytes(4, 'big'))
-                sock.send(content)
-                print("✅ File sent.")
-            else:
-                dtype = sock.recv(1)
-                dlen = int.from_bytes(sock.recv(4), 'big')
-                data = sock.recv(dlen)
-                os.makedirs("Received", exist_ok=True)
-                with open(f"Received/{file_name}", 'wb') as f:
-                    f.write(data)
-                print("✅ File received.")
-        else:
-            print("❌ Request rejected:", resp.get("message"))
-    finally:
-        sock.close()
+        if resp.get("status") != "accepted":
+            print("❌ Rejected:", resp.get("message"))
+            return
 
-# Replace with actual discovered IP and port from your Ruby peer
-RUBY_IP = "10.0.6.205"  # or the actual IP discovered via Zeroconf
-RUBY_PORT = 5001
-FILE_NAME = "needfromruby.txt"
+        dtype = sock.recv(1)
+        dlen = int.from_bytes(sock.recv(4), 'big')
+        content = sock.recv(dlen)
 
-send_file_request(RUBY_IP, RUBY_PORT, FILE_NAME, is_sending=False)
+        with open(f"Received/{filename}", 'wb') as f:
+            f.write(content)
+
+        print(f"✅ File '{filename}' received and saved to /Received/")

@@ -1,6 +1,8 @@
 from zeroconf import ServiceInfo, Zeroconf
 import socket
 
+zeroconf_instance = None
+
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
@@ -9,6 +11,7 @@ def get_local_ip():
     return ip
 
 def advertise_service(name="python-peer", port=5001):
+    global zeroconf_instance
     ip = get_local_ip()
     desc = {
         "address": ip,
@@ -26,15 +29,19 @@ def advertise_service(name="python-peer", port=5001):
         server=f"{name}.local."
     )
 
-    zeroconf = Zeroconf()
-    zeroconf.register_service(info)
-    print(f"[Python] Advertised {service_name} on {ip}:{port}")
+    zeroconf_instance = Zeroconf()
+    zeroconf_instance.register_service(info)
+    print(f"[Python] ✅ Advertised {service_name} on {ip}:{port}")
+    return service_name
 
-    return zeroconf
+def stop_advertisement():
+    if zeroconf_instance:
+        zeroconf_instance.close()
+        print("[Python] 🔌 Advertisement stopped")
 
 if __name__ == "__main__":
-    zeroconf = advertise_service()
+    advertise_service()
     try:
         input("Press enter to exit...\n")
     finally:
-        zeroconf.close()
+        stop_advertisement()
