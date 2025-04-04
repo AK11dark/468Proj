@@ -36,8 +36,8 @@ def main():
                 peer = peers[idx]
                 filename = input("Enter filename to request: ").strip()
                 #request_file(peer["ip"], peer["port"], filename)
-                print(peer["ip"], peer["port"])
-                test_ping(peer["ip"], peer["port"])
+                print(peer["ip"], peer["port"],filename)
+                request_file(peer["ip"], peer["port"], filename)
 
             except (ValueError, IndexError):
                 print("Invalid selection.")

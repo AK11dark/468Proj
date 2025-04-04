@@ -1,17 +1,21 @@
-require_relative "discover"      # for advertising
-require_relative "advertise"     # for discovering
+require_relative "discover"      # for discovering
+require_relative "advertise"     # for advertising
 require_relative "file_server"
 
-# Start file server
 Thread.new do
   start_file_server
 end
 
+# Keep a reference to the announcer so it doesn't get GC'd
+announcer = DNSSD::PeerAnnouncer.new
+
 # Start advertising
 Thread.new do
-  announcer = DNSSD::PeerAnnouncer.new
   announcer.start
 end
+
+
+
 
 puts "\n🔁 mDNS advertising started."
 puts "📡 mDNS discovery ready."
