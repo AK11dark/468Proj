@@ -51,7 +51,13 @@ def request_file(ip, port, filename, session_key)
 
     begin
       plaintext = cipher.update(ciphertext) + cipher.final
-      puts "✅ Decrypted file content:\n\n#{plaintext}"
+      Dir.mkdir("Received") unless Dir.exist?("Received")
+      output_path = File.join("Received", filename)
+
+      File.open(output_path, "wb") do |f|
+        f.write(plaintext)
+      end
+      
     rescue OpenSSL::Cipher::CipherError => e
       puts "❌ Decryption failed: #{e.message}"
     end
