@@ -111,3 +111,33 @@ def perform_key_exchange(peer_ip, peer_port)
     socket.close
   end
 end
+
+
+def request_file_list(peer_ip, peer_port)
+  socket = TCPSocket.new(peer_ip, peer_port)
+  socket.write("L")  # Send list request
+
+  # Wait for response type
+  response_type = socket.read(1)
+  if response_type != "L"
+    puts "❌ Unexpected response to file list request"
+    socket.close
+    return
+  end
+
+  # Read length-prefixed JSON array
+  response_len = socket.read(4).unpack1('N')
+  response = socket.read(response_len)
+  file_list = JSON.parse(response)
+
+  if file_list.is_a?(Array)
+    puts "\n📁 Files available from peer:"
+    file_list.each_with_index do |file, index|
+      puts "#{index + 1}. #{file}"
+    end
+  else
+    puts "❌ Invalid response format"
+  end
+
+  socket.close
+end

@@ -32,6 +32,9 @@ class FileServer:
                 self.handle_file_request(client_socket, client_address)
             elif msg_type == b"K":
                 self.handle_key_exchange(client_socket, client_address)
+            elif msg_type == b"L":
+                self.handle_file_list_request(client_socket)
+
             else:
                 print(f"[Python File Server] ❓ Unknown message type: {msg_type}")
 
@@ -113,6 +116,20 @@ class FileServer:
             client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
             client_socket.send(json.dumps(response).encode('utf-8'))
             print(f"[Python File Server] ❌ File not found: {file_name}")
+            
+    def handle_file_list_request(self, client_socket):
+        try:
+            files = os.listdir("Files")
+            files = [f for f in files if os.path.isfile(os.path.join("Files", f))]
+
+            response = json.dumps(files).encode('utf-8')
+            client_socket.send(b"L")
+            client_socket.send(len(response).to_bytes(4, 'big'))
+            client_socket.send(response)
+
+            print("[Python File Server] 📃 Sent file list to peer.")
+        except Exception as e:
+            print(f"[Python File Server] ❌ Error sending file list: {e}")
 
 
 if __name__ == "__main__":
