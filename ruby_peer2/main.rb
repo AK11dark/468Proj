@@ -2,7 +2,7 @@ require_relative "discover"      # for discovering
 require_relative "advertise"     # for advertising
 require_relative "file_server"   # file server logic
 require_relative "client"        # Add client for file request
-
+require_relative "identity"
 # Start file server in a thread
 Thread.new do
   start_file_server
@@ -24,6 +24,7 @@ loop do
   puts "1. Discover peers"
   puts "2. Request File"
   puts "3. View File List"
+  puts "4. Create an identity to share with peer"
   puts "0. Exit"
   print "> "
 
@@ -61,11 +62,20 @@ loop do
 
         puts "#{selected_peer[:ip]} #{selected_peer[:port]} #{filename}"
 
-        # 🔐 Key exchange + 📂 file request
+        # 🔐 Key exchange for signing
         session_key = perform_key_exchange(selected_peer[:ip], selected_peer[:port])
-        request_file(selected_peer[:ip], selected_peer[:port], filename, session_key)
-      else
-        puts "Invalid selection."
+        #do identity check + ECDSA key creation
+        identity = PeerIdentity.new
+        identity.setup
+        puts"asda"
+        # 🧠 Perform identity authentication
+        if identity.send_authentication(selected_peer[:ip], selected_peer[:port], session_key)
+          puts"asdasd"
+          # ✅ Proceed with file request only if authenticated
+          request_file(selected_peer[:ip], selected_peer[:port], filename, session_key)
+        else
+          puts "❌ Identity verification failed before file request "
+        end
       end
     end
   when "3"
@@ -89,7 +99,10 @@ loop do
         puts "Invalid selection."
       end
     end
-
+  when "4"
+    identity = PeerIdentity.new
+    identity.create_identity
+  
   when "0"
     puts "\n👋 Exiting."
     exit

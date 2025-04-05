@@ -97,13 +97,13 @@ def perform_key_exchange(peer_ip, peer_port)
 
   # Derive shared secret
   shared_secret = ec.dh_compute_key(peer_key.public_key)
-  puts "[Ruby Client] 🤝 Raw shared secret: #{shared_secret.unpack1('H*')}"
+
 
   # Apply HKDF to shared secret
   begin
     digest = OpenSSL::Digest::SHA256.new
     hkdf_key = OpenSSL::KDF.hkdf(shared_secret, salt: "", info: "p2p-key-exchange", length: 32, hash: digest)
-    puts "[Ruby Client] 🧪 Derived key with HKDF: #{hkdf_key.unpack1('H*')}"
+    
     return hkdf_key
   rescue => e
     puts "[Ruby Client] ❌ HKDF derivation failed: #{e.class} - #{e.message}"

@@ -5,6 +5,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from encryption_utils import encrypt_file
+from auth_handler import verify_identity
 
 
 class FileServer:
@@ -34,6 +35,13 @@ class FileServer:
                 self.handle_key_exchange(client_socket, client_address)
             elif msg_type == b"L":
                 self.handle_file_list_request(client_socket)
+            elif msg_type == b"A":
+                if verify_identity(client_socket, self.session_key):
+                    print("✅ Peer authenticated successfully.")
+                else:
+                    print("❌ Authentication failed.")
+
+            
 
             else:
                 print(f"[Python File Server] ❓ Unknown message type: {msg_type}")
