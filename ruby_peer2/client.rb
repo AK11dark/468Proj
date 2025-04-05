@@ -3,46 +3,65 @@ require 'json'
 require 'openssl'
 require 'base64'
 
-# Function to request a file from a remote server (Python file server)
-def request_file(ip, port, filename)
-  # Make the connection to the peer's file server
+
+def request_file(ip, port, filename, session_key)
   socket = TCPSocket.new(ip, port)
-  request = {
-    "file_name" => filename
-  }
+  request = { "file_name" => filename }
   socket.write("F")
-  socket.write([request.to_json.bytesize].pack('N')) # Send length of JSON request
+  socket.write([request.to_json.bytesize].pack('N'))
   socket.write(request.to_json)
 
-  # Receive the response from the server
-  response = socket.read(1)  # Receive the response type (F for file request)
-  if response != "F"
+  # Expect "F" + metadata
+  response_type = socket.read(1)
+  if response_type != "F"
     puts "❌ Unexpected response"
     socket.close
     return
   end
 
-  # Get the length of the response
-  data_len = socket.read(4).unpack1('N')
-  data = JSON.parse(socket.read(data_len))
+  # Read status JSON
+  response_len = socket.read(4).unpack1('N')
+  response = JSON.parse(socket.read(response_len))
 
-  if data["status"] == "accepted"
-    # Receiving file content
-    file_data_len = socket.read(4).unpack1('N')
-    file_data = socket.read(file_data_len)
-
-    # Save the file to the local machine
-    File.open("Received/#{filename}", 'wb') do |file|
-      file.write(file_data)
+  if response["status"] == "accepted"
+    # Expect "D" next
+    data_type = socket.read(1)
+    if data_type != "D"
+      puts "❌ Expected file data block"
+      socket.close
+      return
     end
 
-    puts "✅ File '#{filename}' received and saved."
+    # --- Encrypted file parts ---
+    iv_len = socket.read(4).unpack1('N')
+    iv = socket.read(iv_len)
+
+    tag_len = socket.read(4).unpack1('N')
+    tag = socket.read(tag_len)
+
+    ciphertext_len = socket.read(4).unpack1('N')
+    ciphertext = socket.read(ciphertext_len)
+
+    # --- Decrypt ---
+    cipher = OpenSSL::Cipher.new('aes-256-gcm')
+    cipher.decrypt
+    cipher.key = session_key
+    cipher.iv = iv
+    cipher.auth_tag = tag
+
+    begin
+      plaintext = cipher.update(ciphertext) + cipher.final
+      puts "✅ Decrypted file content:\n\n#{plaintext}"
+    rescue OpenSSL::Cipher::CipherError => e
+      puts "❌ Decryption failed: #{e.message}"
+    end
   else
-    puts "❌ Error: #{data["message"]}"
+    puts "❌ Error: #{response["message"]}"
   end
 
   socket.close
 end
+
 
 
 def perform_key_exchange(peer_ip, peer_port)
@@ -79,6 +98,7 @@ def perform_key_exchange(peer_ip, peer_port)
     digest = OpenSSL::Digest::SHA256.new
     hkdf_key = OpenSSL::KDF.hkdf(shared_secret, salt: "", info: "p2p-key-exchange", length: 32, hash: digest)
     puts "[Ruby Client] 🧪 Derived key with HKDF: #{hkdf_key.unpack1('H*')}"
+    return hkdf_key
   rescue => e
     puts "[Ruby Client] ❌ HKDF derivation failed: #{e.class} - #{e.message}"
   ensure
