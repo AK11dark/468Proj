@@ -1,9 +1,7 @@
 from advertise import advertise_service, stop_advertisement
 from discover import discover_peers
-from client import request_file
-from client import test_ping
-from client import perform_key_exchange_with_ruby
-
+from client import request_file, test_ping, perform_key_exchange_with_ruby
+from identity import create_identity  # ✅ This is your identity setup
 
 import subprocess
 
@@ -11,11 +9,14 @@ def main():
     print("🔁 Starting P2P Python Client")
     service_name = advertise_service()
     subprocess.Popen(["python3", "file_server.py"])
+
     while True:
         print("\nMenu:")
         print("1. Find peers")
         print("2. Request File")
+        print("3. 🔐 Create Identity")
         print("0. Exit")
+
         choice = input("Enter choice: ")
 
         if choice == "1":
@@ -26,6 +27,7 @@ def main():
                 print("\n✅ Discovered Peers:")
                 for i, peer in enumerate(peers, 1):
                     print(f"{i}. {peer['name']} @ {peer['ip']}:{peer['port']}")
+
         elif choice == "2":
             peers = discover_peers()
             if not peers:
@@ -39,16 +41,24 @@ def main():
                 idx = int(input("Peer number: ")) - 1
                 peer = peers[idx]
                 filename = input("Enter filename to request: ").strip()
+
+                # Perform ECDH key exchange
                 session_key = perform_key_exchange_with_ruby(peer["ip"], peer["port"])
-                print("request sent")
-               
+                if not session_key:
+                    print("❌ Key exchange failed.")
+                    continue
+                
 
             except (ValueError, IndexError):
                 print("Invalid selection.")
 
+        elif choice == "3":
+            create_identity()
+
         elif choice == "0":
             stop_advertisement()
             break
+
         else:
             print("Invalid choice.")
 
