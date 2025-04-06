@@ -35,9 +35,18 @@ def verify_identity(client_socket, session_key):
     known_peers = load_known_peers()
 
     if username not in known_peers:
-        print(f"❌ Rejected: Unknown peer '{username}'.")
-        return False
+        print(f"👋 First-time peer: {username}")
+        print(f"Public key:\n{pubkey_pem}")
 
+        # Trust on first use: save the key
+        known_peers[username] = pubkey_pem
+        with open(KNOWN_PEERS_PATH, "w") as f:
+            json.dump(known_peers, f, indent=2)
+
+        print(f"✅ {username} added to known peers.")
+        client_socket.send(b"A")
+        return True
+        
     expected_pem = known_peers[username]
     expected_key = serialization.load_pem_public_key(expected_pem.encode())
 
