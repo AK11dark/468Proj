@@ -57,6 +57,7 @@ def request_file(ip, port, filename, session_key)
       File.open(output_path, "wb") do |f|
         f.write(plaintext)
       end
+      puts "file received"
       
     rescue OpenSSL::Cipher::CipherError => e
       puts "❌ Decryption failed: #{e.message}"

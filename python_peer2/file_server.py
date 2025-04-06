@@ -84,6 +84,7 @@ class FileServer:
         print("[Python] 📤 Sent PEM public key to Ruby peer")
 
     def handle_file_request(self, client_socket, client_address):
+
         data_len = int.from_bytes(client_socket.recv(4), 'big')
         data = client_socket.recv(data_len)
         request = json.loads(data.decode('utf-8'))
@@ -92,8 +93,22 @@ class FileServer:
         print(f"[Python File Server] 📅 Incoming request for file '{file_name}'")
 
         file_path = os.path.join("Files", file_name)
-
         if os.path.exists(file_path):
+            print(f"📥 File request from {client_address[0]} for '{file_name}'")
+
+       
+            confirm = input(f"⚠️ Allow transfer of '{file_name}'? (y/n): ").strip().lower()
+     
+
+            if confirm != "y":
+                response = {"status": "rejected", "message": "User denied file transfer"}
+                client_socket.send(b"F")
+                client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
+                client_socket.send(json.dumps(response).encode('utf-8'))
+                print("❌ File transfer denied.")
+                return
+
+            # Proceed to read + send file
             with open(file_path, 'rb') as file:
                 file_content = file.read()
 
@@ -101,30 +116,19 @@ class FileServer:
             client_socket.send(b"F")
             client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
             client_socket.send(json.dumps(response).encode('utf-8'))
-            
 
             encrypted = encrypt_file(file_content, self.session_key)
 
             client_socket.send(b"D")
-
             client_socket.send(len(encrypted["iv"]).to_bytes(4, 'big'))
             client_socket.send(encrypted["iv"])
-
             client_socket.send(len(encrypted["tag"]).to_bytes(4, 'big'))
             client_socket.send(encrypted["tag"])
-
             client_socket.send(len(encrypted["ciphertext"]).to_bytes(4, 'big'))
             client_socket.send(encrypted["ciphertext"])
 
-            print(f"[Python File Server] 🔐 Encrypted file '{file_name}' sent.")
+            print(f"[Python File Server] ✅ Encrypted file '{file_name}' sent.")
 
-        else:
-            response = {"status": "rejected", "message": "File not found"}
-            client_socket.send(b"F")
-            client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
-            client_socket.send(json.dumps(response).encode('utf-8'))
-            print(f"[Python File Server] ❌ File not found: {file_name}")
-            
     def handle_file_list_request(self, client_socket):
         try:
             files = os.listdir("Files")

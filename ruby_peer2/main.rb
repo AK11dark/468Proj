@@ -64,7 +64,8 @@ loop do
 
         # 🔐 Key exchange for signing
         session_key = perform_key_exchange(selected_peer[:ip], selected_peer[:port])
-        #do identity check + ECDSA key creation
+        #ECDSA key creation + loading of identity information payload to send over
+        #session key gets signed using ECDSA here for mutual auth
         identity = PeerIdentity.new
         identity.setup
         puts"asda"
