@@ -3,10 +3,13 @@ require_relative "advertise"     # for advertising
 require_relative "file_server"   # file server logic
 require_relative "client"        # Add client for file request
 require_relative "identity"
-# Start file server in a thread
+
+# Start OOP FileServer in a thread
+file_server = FileServer.new
 Thread.new do
-  start_file_server
+  file_server.start
 end
+
 
 # Keep a reference to the announcer so it doesn't get GC'd
 announcer = DNSSD::PeerAnnouncer.new

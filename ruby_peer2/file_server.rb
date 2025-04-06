@@ -1,51 +1,76 @@
 require 'socket'
 require 'json'
+require 'openssl'
 
-def start_file_server
-  port = 5001
-  server = TCPServer.new("0.0.0.0", port)
-  puts "[Ruby Server] Listening on port #{port}..."
+class FileServer
+  def initialize(host = '0.0.0.0', port = 5001)
+    @host = host
+    @port = port
+    @session_keys = {}  # optional: store per-client if needed
+  end
 
-  loop do
-    client = server.accept
-    Thread.new do
-      begin
-        msg_type = client.read(1)
-        data_len = client.read(4)&.unpack1('N')
-        data = client.read(data_len)
+  def start
+    server = TCPServer.new(@host, @port)
+    puts "[Ruby File Server] Listening on #{@host}:#{@port}..."
 
-        if msg_type == "F"
-          request = JSON.parse(data)
-          file_name = request["file_name"]
-          puts "[Ruby Server] 📥 Incoming request for '#{file_name}'"
-
-          path = File.join("Files", file_name)
-          if File.exist?(path)
-            content = File.read(path)
-            client.write("F")
-            ack = { status: "accepted" }
-            client.write([ack.to_json.bytesize].pack('N'))
-            client.write(ack.to_json)
-
-            client.write("D")
-            client.write([content.bytesize].pack('N'))
-            client.write(content)
-            puts "[Ruby Server] ✅ Sent file '#{file_name}'"
-          else
-            client.write("F")
-            response = { status: "rejected", message: "File not found" }
-            client.write([response.to_json.bytesize].pack('N'))
-            client.write(response.to_json)
-            puts "[Ruby Server] ❌ File not found: #{file_name}"
-          end
-        else
-          puts "[Ruby Server] ❓ Unknown message type: #{msg_type.inspect}"
-        end
-      rescue => e
-        puts "[Ruby Server] ❌ Error: #{e}"
-      ensure
-        client.close
+    loop do
+      client = server.accept
+      Thread.new(client) do |socket|
+        handle_client(socket)
+        socket.close
       end
     end
   end
+
+  def handle_client(socket)
+    command = socket.read(1)
+
+    case command
+    when "K"
+      handle_key_exchange(socket)
+    else
+      puts "[Ruby File Server] ❓ Unknown command: #{command.inspect}"
+    end
+  end
+
+  def handle_key_exchange(socket)
+    len = socket.read(4).unpack1('N')
+    payload = socket.read(len)
+    data = JSON.parse(payload)
+
+    peer_pem = data["public_key"]
+    peer_key = OpenSSL::PKey::EC.new(peer_pem)
+
+    puts "[Ruby Server] 📥 Received Python's public key."
+
+    # Generate EC key pair
+    ec = OpenSSL::PKey::EC.generate('prime256v1')
+    shared_secret = ec.dh_compute_key(peer_key.public_key)
+    puts "[Ruby Server] 🔐 Shared secret: #{shared_secret.unpack1('H*')}"
+
+    digest = OpenSSL::Digest::SHA256.new
+    session_key = OpenSSL::KDF.hkdf(
+      shared_secret,
+      salt: "",
+      info: "p2p-key-exchange",
+      length: 32,
+      hash: digest
+    )
+    puts "[Ruby Server] 🧪 Derived session key: #{session_key.unpack1('H*')}"
+
+    # Send our public key back
+  # Wrap it before calling to_pem
+    pub_key_obj = OpenSSL::PKey::EC.new('prime256v1')
+    pub_key_obj.public_key = ec.public_key
+    public_key_pem = pub_key_obj.to_pem
+    socket.write([public_key_pem.bytesize].pack('N'))
+    socket.write(public_key_pem)
+    puts "[Ruby Server] 📤 Sent our public key to Python."
+  end
+end
+
+# Run server
+if __FILE__ == $0
+  server = FileServer.new
+  server.start
 end

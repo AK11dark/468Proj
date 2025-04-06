@@ -64,10 +64,6 @@ class PeerIdentity
     pub.to_pem
   end
 
-  def sign_username
-    sig = @key.dsa_sign_asn1(@username)
-    Base64.strict_encode64(sig)
-  end
 
   def identity_payload
     {

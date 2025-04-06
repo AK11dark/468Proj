@@ -2,6 +2,8 @@ from advertise import advertise_service, stop_advertisement
 from discover import discover_peers
 from client import request_file
 from client import test_ping
+from client import perform_key_exchange_with_ruby
+
 
 import subprocess
 
@@ -37,9 +39,9 @@ def main():
                 idx = int(input("Peer number: ")) - 1
                 peer = peers[idx]
                 filename = input("Enter filename to request: ").strip()
-                #request_file(peer["ip"], peer["port"], filename)
+                session_key = perform_key_exchange_with_ruby(peer["ip"], peer["port"])
                 print("request sent")
-                request_file(peer["ip"], peer["port"], filename)
+               
 
             except (ValueError, IndexError):
                 print("Invalid selection.")
