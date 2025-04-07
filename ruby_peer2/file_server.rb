@@ -6,7 +6,8 @@ class FileServer
   def initialize(host = '0.0.0.0', port = 5001)
     @host = host
     @port = port
-    @session_keys = {}  # optional: store per-client if needed
+    @session_key = nil
+
   end
 
   def start
@@ -16,8 +17,12 @@ class FileServer
     loop do
       client = server.accept
       Thread.new(client) do |socket|
-        handle_client(socket)
-        socket.close
+        begin
+          handle_client(socket)
+        ensure
+          @session_keys.delete(socket)
+          socket.close
+        end
       end
     end
   end
@@ -28,25 +33,14 @@ class FileServer
     case command
     when "K"
       handle_key_exchange(socket)
-  
+    
+
     when "A"
-      
-      print('a has BEEN RECIVED')
-      session_key = @session_keys[socket]
+      puts "\n🟣 'A' command received — starting authentication handler"
       data = socket.recv(4096)
       message = JSON.parse(data)
-      verified = verify_identity(message, socket)
-      puts "\n🔐 Received authentication message from peer:"
-      puts "👤 Username: #{message["username"]}"
-      puts "📤 Public Key (PEM):\n#{message["public_key"]}"
-      puts "📜 Signature (hex): #{message["signature"]}"
-  
-      if verified
-        socket.puts "✅ Identity verified for #{message["username"]}"
-      else
-        socket.puts "❌ Identity verification failed"
-      end
-  
+      verify_identity(message, socket)
+
     else
       puts "[Ruby File Server] ❓ Unknown command: #{command.inspect}"
     end
@@ -76,9 +70,12 @@ class FileServer
       hash: digest
     )
     puts "[Ruby Server] 🧪 Derived session key: #{session_key.unpack1('H*')}"
-    @session_keys[socket] = session_key
+    @session_key = session_key
+
+    puts "[Ruby Server] ✅ Session key stored for socket."
+  puts "[Ruby Server] 🔑 Session Key (hex): #{session_key.unpack1('H*')}"
+
     # Send our public key back
-  # Wrap it before calling to_pem
     pub_key_obj = OpenSSL::PKey::EC.new('prime256v1')
     pub_key_obj.public_key = ec.public_key
     public_key_pem = pub_key_obj.to_pem
@@ -86,8 +83,6 @@ class FileServer
     socket.write(public_key_pem)
     puts "[Ruby Server] 📤 Sent our public key to Python."
   end
-end
-
 
   def verify_identity(message, socket)
     username = message["username"]
@@ -97,7 +92,8 @@ end
     puts "👤 Username: #{username}"
     puts "📤 Public Key (PEM):\n#{public_key_pem}"
     puts "📜 Signature (hex): #{signature_hex}"
-    puts "session key #{session_key}"
+
+    session_key = @session_key
 
     if session_key.nil?
       puts "❌ No session key found for this socket!"
@@ -143,9 +139,20 @@ end
     end
   end
 
+  def load_known_peers
+    file = "known_peers.json"
+    return {} unless File.exist?(file)
+    JSON.parse(File.read(file))
+  end
 
+  def save_known_peer(username, public_key_pem)
+    peers = load_known_peers
+    peers[username] = public_key_pem
+    File.write("known_peers.json", JSON.pretty_generate(peers))
+  end
+end
 
-# Run server
+# Run the server
 if __FILE__ == $0
   server = FileServer.new
   server.start

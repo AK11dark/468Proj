@@ -47,6 +47,7 @@ def main():
                 if not session_key:
                     print("❌ Key exchange failed.")
                     continue
+                
                 identity_payload = sign_session_key(session_key)
                 send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
 
