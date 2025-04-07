@@ -149,7 +149,6 @@ class FileServer
     File.write("known_peers.json", JSON.pretty_generate(peers))
   end
 end
-
 def handle_file_request(socket)
   len = socket.read(4).unpack1("N")
   payload = socket.read(len)
@@ -169,8 +168,17 @@ def handle_file_request(socket)
     return
   end
 
-
   file_data = File.binread(file_path)
+
+  # ✅ Encrypt the file with AES-GCM and the session key
+  cipher = OpenSSL::Cipher.new("aes-256-gcm")
+  cipher.encrypt
+  cipher.key = @session_key
+  iv = cipher.random_iv
+  cipher.iv = iv
+
+  ciphertext = cipher.update(file_data) + cipher.final
+  tag = cipher.auth_tag
 
   # ✅ Send accepted response
   response = { status: "accepted" }
@@ -178,12 +186,22 @@ def handle_file_request(socket)
   socket.write([response.to_json.bytesize].pack("N"))
   socket.write(response.to_json)
 
-  # ✅ Send file data
+  # ✅ Send encrypted data
   socket.write("D")
-  socket.write([file_data.bytesize].pack("N"))
-  socket.write(file_data)
 
-  puts "✅ Sent file '#{file_name}' to peer."
+  socket.write([iv.bytesize].pack("N"))
+  socket.write(iv)
+
+  socket.write([tag.bytesize].pack("N"))
+  socket.write(tag)
+
+  socket.write([ciphertext.bytesize].pack("N"))
+  socket.write(ciphertext)
+
+  puts "🔐 Encrypted file '#{file_name}' sent."
+  puts "🔑 IV: #{iv.unpack1('H*')}"
+  puts "📎 Tag: #{tag.unpack1('H*')}"
+  puts "🧱 Ciphertext size: #{ciphertext.bytesize} bytes"
 end
 
 
