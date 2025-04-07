@@ -1,7 +1,7 @@
 from advertise import advertise_service, stop_advertisement
 from discover import discover_peers
 from client import request_file, test_ping, perform_key_exchange_with_ruby
-from identity import create_identity  # ✅ This is your identity setup
+from identity import create_identity, sign_session_key, send_identity_to_ruby  # ✅ This is your identity setup
 
 import subprocess
 
@@ -47,7 +47,8 @@ def main():
                 if not session_key:
                     print("❌ Key exchange failed.")
                     continue
-                
+                identity_payload = sign_session_key(session_key)
+                send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
 
             except (ValueError, IndexError):
                 print("Invalid selection.")

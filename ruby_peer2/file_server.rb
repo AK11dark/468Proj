@@ -28,6 +28,25 @@ class FileServer
     case command
     when "K"
       handle_key_exchange(socket)
+  
+    when "A"
+      
+      print('a has BEEN RECIVED')
+      session_key = @session_keys[socket]
+      data = socket.recv(4096)
+      message = JSON.parse(data)
+      verified = verify_identity(message, socket)
+      puts "\n🔐 Received authentication message from peer:"
+      puts "👤 Username: #{message["username"]}"
+      puts "📤 Public Key (PEM):\n#{message["public_key"]}"
+      puts "📜 Signature (hex): #{message["signature"]}"
+  
+      if verified
+        socket.puts "✅ Identity verified for #{message["username"]}"
+      else
+        socket.puts "❌ Identity verification failed"
+      end
+  
     else
       puts "[Ruby File Server] ❓ Unknown command: #{command.inspect}"
     end
@@ -57,7 +76,7 @@ class FileServer
       hash: digest
     )
     puts "[Ruby Server] 🧪 Derived session key: #{session_key.unpack1('H*')}"
-
+    @session_keys[socket] = session_key
     # Send our public key back
   # Wrap it before calling to_pem
     pub_key_obj = OpenSSL::PKey::EC.new('prime256v1')
@@ -68,6 +87,63 @@ class FileServer
     puts "[Ruby Server] 📤 Sent our public key to Python."
   end
 end
+
+
+  def verify_identity(message, socket)
+    username = message["username"]
+    public_key_pem = message["public_key"]
+    signature_hex = message["signature"]
+
+    puts "👤 Username: #{username}"
+    puts "📤 Public Key (PEM):\n#{public_key_pem}"
+    puts "📜 Signature (hex): #{signature_hex}"
+    puts "session key #{session_key}"
+
+    if session_key.nil?
+      puts "❌ No session key found for this socket!"
+      socket.puts({ status: "error", message: "No session key" }.to_json)
+      return false
+    end
+
+    puts "🔑 Session Key (hex): #{session_key.unpack1('H*')}"
+
+    begin
+      pubkey = OpenSSL::PKey::EC.new(public_key_pem)
+      digest = OpenSSL::Digest::SHA256.new
+      signature = [signature_hex].pack("H*")
+
+      known_peers = load_known_peers
+
+      if !known_peers.key?(username)
+        puts "👋 First-time peer: #{username} — trusting on first use"
+        save_known_peer(username, public_key_pem)
+      else
+        expected = OpenSSL::PKey::EC.new(known_peers[username])
+        if expected.to_der != pubkey.to_der
+          puts "❌ Public key mismatch for known peer!"
+          socket.puts({ status: "error", message: "Public key mismatch" }.to_json)
+          return false
+        end
+      end
+
+      if pubkey.dsa_verify_asn1(digest.digest(session_key), signature)
+        puts "✅ Signature verified for #{username}"
+        socket.puts({ status: "ok", message: "Identity verified" }.to_json)
+        return true
+      else
+        puts "❌ Signature invalid!"
+        socket.puts({ status: "error", message: "Signature invalid" }.to_json)
+        return false
+      end
+
+    rescue => e
+      puts "❌ Error during verification: #{e}"
+      socket.puts({ status: "error", message: "Exception: #{e.message}" }.to_json)
+      return false
+    end
+  end
+
+
 
 # Run server
 if __FILE__ == $0

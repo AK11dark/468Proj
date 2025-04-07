@@ -20,7 +20,7 @@ class FileServer:
         self.server.listen(5)
         print(f"[Python File Server] Listening on {self.host}:{self.port}...")
 
-        while True:
+        while True: 
             client_socket, client_address = self.server.accept()
             print(f"[Python File Server] Connection from {client_address}")
             self.handle_client(client_socket, client_address)
