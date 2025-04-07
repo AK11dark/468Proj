@@ -31,11 +31,13 @@ The request_file() function triggers a prompt on the sender's console to confirm
 📄 test_file_list_request: Sends a list request using command L. The peer responds with a JSON list of filenames, no approval required
 
 6. New key migration
+7. 
 We use ephemeral keys 
 
-7. File Integrity
+8. File Integrity
    
 🧨 test_tampered_file: Encrypts a file with AES-GCM, then modifies one byte of the ciphertext. The decryption fails with an exception, proving that any tampering is detected.
+
 🔐 test_mutual_auth_success and test_tampered_file indirectly validate this.
 
 
