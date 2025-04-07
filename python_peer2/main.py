@@ -77,6 +77,8 @@ def main():
                 request_file_list(peer["ip"], peer["port"])
             except (ValueError, IndexError):
                 print("❌ Invalid selection.")
+        elif choice == "5":
+            print("encrypt files")
         elif choice == "0":
             stop_advertisement()
             break

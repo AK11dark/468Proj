@@ -131,6 +131,8 @@ def request_file_list(ip, port):
             print("📃 Files available on peer:")
             for f in file_list:
                 print(" -", f)
+            
+            return file_list
 
     except Exception as e:
         print("❌ Failed to get file list:", e)
