@@ -5,24 +5,25 @@ import os
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
 
 def test_ping(ip, port):
     with socket.create_connection((ip, port)) as sock:
         sock.send(b"PING")
         print(f"✅ Sent 'PING' to {ip}:{port}")
-
-def request_file(ip, port, filename):
+def request_file(ip, port, filename, session_key):
     os.makedirs("Received", exist_ok=True)
 
     with socket.create_connection((ip, port)) as sock:
-        request = {
-            "file_name": filename,
-        }
+        # Send file request
+        request = { "file_name": filename }
         request_bytes = json.dumps(request).encode("utf-8")
         sock.send(b"F")
         sock.send(len(request_bytes).to_bytes(4, 'big'))
         sock.send(request_bytes)
 
+        # Expect response type "F"
         resp_type = sock.recv(1)
         if resp_type != b"F":
             print("❌ Unexpected response type")
@@ -35,15 +36,39 @@ def request_file(ip, port, filename):
             print("❌ Rejected:", resp.get("message"))
             return
 
+        # Expect data block
         dtype = sock.recv(1)
-        dlen = int.from_bytes(sock.recv(4), 'big')
-        content = sock.recv(dlen)
+        if dtype != b"D":
+            print("❌ Expected encrypted file data block, got:", dtype)
+            return
 
-        with open(f"Received/{filename}", 'wb') as f:
-            f.write(content)
+        # Read encrypted payload (IV, tag, ciphertext)
+        iv_len = int.from_bytes(sock.recv(4), 'big')
+        iv = sock.recv(iv_len)
 
-        print(f"✅ File '{filename}' received and saved to /Received/")
+        tag_len = int.from_bytes(sock.recv(4), 'big')
+        tag = sock.recv(tag_len)
 
+        ct_len = int.from_bytes(sock.recv(4), 'big')
+        ciphertext = sock.recv(ct_len)
+
+        # Decrypt using AES-256-GCM
+        try:
+            decryptor = Cipher(
+                algorithms.AES(session_key),
+                modes.GCM(iv, tag)
+            ).decryptor()
+            plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+        except Exception as e:
+            print("❌ Decryption failed:", e)
+            return
+
+        # Save decrypted file
+        save_path = f"Received/{filename}"
+        with open(save_path, 'wb') as f:
+            f.write(plaintext)
+
+        print(f"✅ File '{filename}' decrypted and saved to {save_path}")
 
 def perform_key_exchange_with_ruby(peer_ip, peer_port):
     print("[Python Client] 🧠 Generating EC key pair...")

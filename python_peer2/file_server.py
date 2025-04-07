@@ -8,6 +8,7 @@ from encryption_utils import encrypt_file
 from auth_handler import verify_identity
 
 
+
 class FileServer:
     def __init__(self, host='0.0.0.0', port=5003):
         self.host = host

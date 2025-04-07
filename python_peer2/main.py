@@ -2,6 +2,7 @@ from advertise import advertise_service, stop_advertisement
 from discover import discover_peers
 from client import request_file, test_ping, perform_key_exchange_with_ruby
 from identity import create_identity, sign_session_key, send_identity_to_ruby  # ✅ This is your identity setup
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 import subprocess
 
@@ -51,7 +52,7 @@ def main():
                 identity_payload = sign_session_key(session_key)
                 response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
                 if response:
-                    request_file(peer["ip"], peer["port"], filename)
+                    request_file(peer["ip"], peer["port"], filename, session_key)
                 else:
                     print("error with identitfication")
 
