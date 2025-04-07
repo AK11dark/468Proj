@@ -9,6 +9,10 @@ Basic usage:
 
 
 Criteria Satisfaction:
+1. Peer Discovery
+Support peer discovery on a local network (e.g., via mDNS).
+
+Every test begins with a call to discover_peers(), which performs mDNS peer discovery. If no peers are found, the test exits early.
 
 2. Mutual Auth
    
@@ -18,20 +22,24 @@ Criteria Satisfaction:
 
 🔏 test_auth_key_mismatch: Replaces the public key with a tampered one while keeping the username the same. The Ruby peer rejects this mismatch to prevent impersonation.
 
-4. Request File List
-   
-📄 test_file_list_request: Sends a list request using command L. The peer responds with a JSON list of filenames, no approval required.
+3. File Request with Consent
 
-6. File Integrity
-   
-🧨 test_tampered_file: Encrypts a file with AES-GCM, then modifies one byte of the ciphertext. The decryption fails with an exception, proving that any tampering is detected.
+The request_file() function triggers a prompt on the sender's console to confirm the file transfer. Although this is a manual confirmation, the system halts the transfer until the user responds.
+
+4. Request File List
+
+📄 test_file_list_request: Sends a list request using command L. The peer responds with a JSON list of filenames, no approval required
+
+6. New key migration
+We use ephemeral keys 
 
 7. File Integrity
    
+🧨 test_tampered_file: Encrypts a file with AES-GCM, then modifies one byte of the ciphertext. The decryption fails with an exception, proving that any tampering is detected.
 🔐 test_mutual_auth_success and test_tampered_file indirectly validate this.
-Files are encrypted using AES-GCM with ephemeral session keys (see requirement 8).
 
-9. Perfect Forward Secrecy
+
+8. Perfect Forward Secrecy
 
 🔁 test_forward_secrecy: Performs two key exchanges in a row and verifies the derived session keys are different.
 
