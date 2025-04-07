@@ -20,7 +20,6 @@ class FileServer
         begin
           handle_client(socket)
         ensure
-          @session_keys.delete(socket)
           socket.close
         end
       end
