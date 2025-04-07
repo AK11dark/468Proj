@@ -51,7 +51,7 @@ def main():
                 identity_payload = sign_session_key(session_key)
                 response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
                 if response:
-                    print("requesting file now")
+                    request_file(peer["ip"], peer["port"], filename)
                 else:
                     print("error with identitfication")
 

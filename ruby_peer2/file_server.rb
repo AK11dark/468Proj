@@ -30,16 +30,15 @@ class FileServer
     command = socket.read(1)
 
     case command
+    when "F"
+      handle_file_request(socket)
     when "K"
       handle_key_exchange(socket)
-    
-
     when "A"
       puts "\n🟣 'A' command received — starting authentication handler"
       data = socket.recv(4096)
       message = JSON.parse(data)
       verify_identity(message, socket)
-
     else
       puts "[Ruby File Server] ❓ Unknown command: #{command.inspect}"
     end
@@ -150,6 +149,43 @@ class FileServer
     File.write("known_peers.json", JSON.pretty_generate(peers))
   end
 end
+
+def handle_file_request(socket)
+  len = socket.read(4).unpack1("N")
+  payload = socket.read(len)
+  request = JSON.parse(payload)
+
+  file_name = request["file_name"]
+  puts "📥 Peer requested file: #{file_name}"
+
+  file_path = File.join("Files", file_name)
+
+  unless File.exist?(file_path)
+    response = { status: "error", message: "File not found" }
+    socket.write("F")
+    socket.write([response.to_json.bytesize].pack("N"))
+    socket.write(response.to_json)
+    puts "❌ File not found: #{file_name}"
+    return
+  end
+
+
+  file_data = File.binread(file_path)
+
+  # ✅ Send accepted response
+  response = { status: "accepted" }
+  socket.write("F")
+  socket.write([response.to_json.bytesize].pack("N"))
+  socket.write(response.to_json)
+
+  # ✅ Send file data
+  socket.write("D")
+  socket.write([file_data.bytesize].pack("N"))
+  socket.write(file_data)
+
+  puts "✅ Sent file '#{file_name}' to peer."
+end
+
 
 # Run the server
 if __FILE__ == $0
