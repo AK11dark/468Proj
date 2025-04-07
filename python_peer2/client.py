@@ -113,3 +113,24 @@ def perform_key_exchange_with_ruby(peer_ip, peer_port):
 
     sock.close()
     return derived_key
+
+def request_file_list(ip, port):
+    try:
+        with socket.create_connection((ip, port), timeout=5) as sock:
+            sock.send(b"L")  # Request file list
+
+            resp_type = sock.recv(1)
+            if resp_type != b"L":
+                print("❌ Unexpected response type:", resp_type)
+                return
+
+            length = int.from_bytes(sock.recv(4), 'big')
+            data = sock.recv(length).decode()
+            file_list = json.loads(data)
+
+            print("📃 Files available on peer:")
+            for f in file_list:
+                print(" -", f)
+
+    except Exception as e:
+        print("❌ Failed to get file list:", e)

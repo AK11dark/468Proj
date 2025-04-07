@@ -32,6 +32,8 @@ class FileServer
     case command
     when "F"
       handle_file_request(socket)
+    when "L"
+      handle_file_list_request(socket)
     when "K"
       handle_key_exchange(socket)
     when "A"
@@ -204,6 +206,22 @@ def handle_file_request(socket)
   puts "🧱 Ciphertext size: #{ciphertext.bytesize} bytes"
 end
 
+
+def handle_file_list_request(socket)
+  dir = "Files"
+  unless Dir.exist?(dir)
+    Dir.mkdir(dir)
+  end
+
+  files = Dir.entries(dir).select { |f| File.file?(File.join(dir, f)) }
+
+  response = files.to_json
+  socket.write("L")
+  socket.write([response.bytesize].pack("N"))
+  socket.write(response)
+
+  puts "📃 Sent file list: #{files.inspect}"
+end
 
 # Run the server
 if __FILE__ == $0

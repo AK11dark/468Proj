@@ -1,6 +1,6 @@
 from advertise import advertise_service, stop_advertisement
 from discover import discover_peers
-from client import request_file, test_ping, perform_key_exchange_with_ruby
+from client import request_file, test_ping, perform_key_exchange_with_ruby, request_file_list
 from identity import create_identity, sign_session_key, send_identity_to_ruby  # ✅ This is your identity setup
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -16,6 +16,7 @@ def main():
         print("1. Find peers")
         print("2. Request File")
         print("3. 🔐 Create Identity")
+        print("4. Request File List")
         print("0. Exit")
 
         choice = input("Enter choice: ")
@@ -61,7 +62,21 @@ def main():
 
         elif choice == "3":
             create_identity()
+        elif choice == "4":
+            peers = discover_peers()
+            if not peers:
+                print("❌ No peers found.")
+                continue
 
+            print("\nChoose a peer to get file list from:")
+            for i, peer in enumerate(peers):
+                print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
+            try:
+                idx = int(input("Peer number: ")) - 1
+                peer = peers[idx]
+                request_file_list(peer["ip"], peer["port"])
+            except (ValueError, IndexError):
+                print("❌ Invalid selection.")
         elif choice == "0":
             stop_advertisement()
             break
