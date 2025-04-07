@@ -48,6 +48,12 @@ We use ephemeral keys
 🔁 test_forward_secrecy: Performs two key exchanges in a row and verifies the derived session keys are different.
 
 10. Security Failures and Errors
+
+
+
+
+POSSIBLE ISSUES:
+If you get an error such as [Python File Server] Server already running. Continuing with client mode only. you need to kill whatever is on port 5003 if python, and kill whatever is on port 5001 if ruby
     
 ❌ test_mutual_auth_failure_tampered_signature: Prints a clear error when signature verification fails.
 
