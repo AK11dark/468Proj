@@ -32,7 +32,7 @@ The request_file() function triggers a prompt on the sender's console to confirm
 📄 test_file_list_request: Sends a list request using command L. The peer responds with a JSON list of filenames, no approval required
 
 6. New key migration
-7. 
+
 We use ephemeral keys 
 
 8. File Integrity
