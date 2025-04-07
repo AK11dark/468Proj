@@ -95,8 +95,8 @@ def send_identity_to_ruby(ip, port, identity_payload):
             sock.sendall(msg_str.encode())
 
             print("✅ Authentication payload sent.")
-            response = sock.recv(4096).decode()
-            print("📥 Server response:", response)
+            response = sock.recv(4096).decode().strip()
+            return response == "A"
 
     except Exception as e:
         print("❌ Failed to send identity:", e)

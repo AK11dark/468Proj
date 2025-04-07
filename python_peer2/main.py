@@ -49,7 +49,11 @@ def main():
                     continue
                 
                 identity_payload = sign_session_key(session_key)
-                send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
+                response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
+                if response:
+                    print("requesting file now")
+                else:
+                    print("error with identitfication")
 
             except (ValueError, IndexError):
                 print("Invalid selection.")

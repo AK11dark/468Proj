@@ -123,17 +123,17 @@ class FileServer
 
       if pubkey.dsa_verify_asn1(digest.digest(session_key), signature)
         puts "✅ Signature verified for #{username}"
-        socket.puts({ status: "ok", message: "Identity verified" }.to_json)
+        socket.puts "A"
         return true
       else
         puts "❌ Signature invalid!"
-        socket.puts({ status: "error", message: "Signature invalid" }.to_json)
+        socket.puts"invalid signature"
         return false
       end
 
     rescue => e
       puts "❌ Error during verification: #{e}"
-      socket.puts({ status: "error", message: "Exception: #{e.message}" }.to_json)
+      socket.puts"unknown error"
       return false
     end
   end
