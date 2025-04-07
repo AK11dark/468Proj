@@ -11,7 +11,7 @@ def start():
 
     if choice == "1":
         print("📤 Starting in reciever mode...")
-        main()
+        main(start_server=True)
         
     elif choice == "2":
         print("📥 Starting in send mode...")
@@ -25,9 +25,9 @@ def start():
             print("\n🛑 Shutting down...")
             stop_advertisement()
             sys.exit(0)
-        else:
-            print("❌ Invalid selection.")
-            sys.exit(1)
+    else:
+        print("❌ Invalid selection.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     start()

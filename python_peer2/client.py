@@ -6,12 +6,10 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from storage import SecureStorage
+from getpass import getpass
 
 
-def test_ping(ip, port):
-    with socket.create_connection((ip, port)) as sock:
-        sock.send(b"PING")
-        print(f"✅ Sent 'PING' to {ip}:{port}")
 def request_file(ip, port, filename, session_key):
     os.makedirs("Received", exist_ok=True)
 
@@ -63,12 +61,24 @@ def request_file(ip, port, filename, session_key):
             print("❌ Decryption failed:", e)
             return
 
-        # Save decrypted file
-        save_path = f"Received/{filename}"
-        with open(save_path, 'wb') as f:
-            f.write(plaintext)
+        # Ask user for a password to encrypt the file locally
+        print("\n🔒 The file will be encrypted locally using a password")
+        password = getpass("Enter password for local encryption: ")
+        if not password:
+            print("❌ Password cannot be empty")
+            # Save the file without encryption if no password provided
+            save_path = f"Received/{filename}"
+            with open(save_path, 'wb') as f:
+                f.write(plaintext)
+            print(f"✅ File '{filename}' saved without encryption to {save_path}")
+            return
+            
+        # Use SecureStorage to store the file with encryption
+        storage = SecureStorage()
+        encrypted_path = storage.store_encrypted_file(plaintext, filename, password)
 
-        print(f"✅ File '{filename}' decrypted and saved to {save_path}")
+        print(f"✅ File '{filename}' encrypted with password and saved to {encrypted_path}")
+        print("To decrypt this file later, use the same password.")
 
 def perform_key_exchange_with_ruby(peer_ip, peer_port):
     print("[Python Client] 🧠 Generating EC key pair...")

@@ -1,15 +1,83 @@
 from advertise import advertise_service, stop_advertisement
 from discover import discover_peers
-from client import request_file, test_ping, perform_key_exchange_with_ruby, request_file_list
+from client import request_file, perform_key_exchange_with_ruby, request_file_list
 from identity import create_identity, sign_session_key, send_identity_to_ruby  # ✅ This is your identity setup
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from storage import SecureStorage
+import os
+from getpass import getpass
 
 import subprocess
+import socket
+import sys
 
-def main():
+def is_port_in_use(port, host='0.0.0.0'):
+    """Check if the specified port is already in use"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((host, port))
+            return False
+        except OSError:
+            return True
+
+def decrypt_stored_file():
+    """Decrypt a previously encrypted file using the provided password"""
+    storage = SecureStorage()
+    
+    # List encrypted files
+    encrypted_files = storage.list_encrypted_files()
+    
+    if not encrypted_files:
+        print("❌ No encrypted files found in the Received directory.")
+        return
+    
+    print("\n🔐 Encrypted files available:")
+    for i, filename in enumerate(encrypted_files, 1):
+        print(f"{i}. {filename}")
+    
+    try:
+        idx = int(input("Select file to decrypt (number): ")) - 1
+        if idx < 0 or idx >= len(encrypted_files):
+            print("❌ Invalid selection.")
+            return
+            
+        filename = encrypted_files[idx]
+        
+        # Ask for password
+        password = getpass("Enter decryption password: ")
+        if not password:
+            print("❌ Password cannot be empty.")
+            return
+        
+        # Get output path
+        output_filename = filename.rsplit('.enc', 1)[0]
+        custom_path = input(f"Enter output path (default: Received/{output_filename}): ").strip()
+        
+        if not custom_path:
+            output_path = os.path.join("Received", output_filename)
+        else:
+            output_path = custom_path
+        
+        # Decrypt the file
+        decrypted_path = storage.get_decrypted_file(filename, password, output_path)
+        
+        if decrypted_path:
+            print(f"✅ File successfully decrypted to: {decrypted_path}")
+        else:
+            print("❌ Decryption failed. Incorrect password or corrupted file.")
+            
+    except (ValueError, IndexError) as e:
+        print(f"❌ Error: {e}")
+
+def main(start_server=True):
     print("🔁 Starting P2P Python Client")
     service_name = advertise_service()
-    subprocess.Popen(["python3", "file_server.py"])
+    
+    # Only start the file server if it's not already running
+    if start_server and not is_port_in_use(5003):
+        print("Starting file server...")
+        subprocess.Popen([sys.executable, "file_server.py"])
+    elif start_server:
+        print("File server already running. Continuing with client mode only.")
 
     while True:
         print("\nMenu:")
@@ -17,6 +85,7 @@ def main():
         print("2. Request File")
         print("3. 🔐 Create Identity")
         print("4. Request File List")
+        print("5. 🔓 Decrypt Stored File")
         print("0. Exit")
 
         choice = input("Enter choice: ")
@@ -78,7 +147,7 @@ def main():
             except (ValueError, IndexError):
                 print("❌ Invalid selection.")
         elif choice == "5":
-            print("encrypt files")
+            decrypt_stored_file()
         elif choice == "0":
             stop_advertisement()
             break
