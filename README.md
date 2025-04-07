@@ -11,7 +11,9 @@ Criteria Satisfaction:
 2. Mutual Auth
    
 🔐 test_mutual_auth_success: Performs a full key exchange, signs a session key with the user's ECDSA key, and sends it to the Ruby peer for verification. A successful response confirms the peer trusts the signature.
+
 🔐 test_mutual_auth_failure_tampered_signature: Simulates an attack by modifying the signature before sending. The peer correctly rejects the signature.
+
 🔏 test_auth_key_mismatch: Replaces the public key with a tampered one while keeping the username the same. The Ruby peer rejects this mismatch to prevent impersonation.
 
 4. Request File List
@@ -34,5 +36,6 @@ Files are encrypted using AES-GCM with ephemeral session keys (see requirement 8
 10. Security Failures and Errors
     
 ❌ test_mutual_auth_failure_tampered_signature: Prints a clear error when signature verification fails.
+
 ❌ test_auth_key_mismatch: Prints a warning when a public key doesn’t match a known identity.
 
