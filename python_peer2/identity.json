@@ -1,1 +1,4 @@
-{"username": "logan", "public_key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWwzf7qugOkGNePFeWn7xeOmetKCp\nD51KbJKhut+6uDKqX1ILrUZwEQrJf0eK1+rwNXQtBrtzaDtY1AdNN1pMfA==\n-----END PUBLIC KEY-----\n"}
+{
+  "username": "josh",
+  "public_key": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEGHiLH8oLmR/jUbqLvqckfLzJR65m\nbRgacfeseA4u3pIfNHxsKRihWa9PRBGSvsAW93DUWXSjtvuEm7k9lcgxgg==\n-----END PUBLIC KEY-----\n"
+}

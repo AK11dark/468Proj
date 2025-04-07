@@ -30,6 +30,9 @@ class FileServer
     command = socket.read(1)
 
     case command
+    when "M"
+      puts "command recieve, peer is migrating key"
+      handle_key_migration(socket)
     when "F"
       handle_file_request(socket)
     when "L"
@@ -221,6 +224,45 @@ def handle_file_list_request(socket)
   socket.write(response)
 
   puts "📃 Sent file list: #{files.inspect}"
+end
+def handle_key_migration(socket)
+  len = socket.read(4).unpack1("N")
+  payload = socket.read(len)
+  message = JSON.parse(payload)
+
+  username = message["username"]
+  new_key_pem = message["new_key"]
+  signature = Base64.decode64(message["signature"])
+
+  puts "🔍 Received new_key PEM:\n#{new_key_pem.inspect}"
+
+  known_peers = load_known_peers
+
+  unless known_peers.key?(username)
+    puts "❌ Cannot migrate unknown peer: #{username}"
+    socket.write("R")
+    return
+  end
+
+  old_key = OpenSSL::PKey::EC.new(known_peers[username])
+
+  begin
+    # ✅ FIX: verify signature over raw new_key_pem (not hashed)
+    valid = old_key.dsa_verify_asn1(new_key_pem, signature)
+
+    if valid
+      puts "✅ Signature verified for key migration of #{username}"
+      known_peers[username] = new_key_pem
+      save_known_peer(username, new_key_pem)
+      socket.write("M")
+    else
+      puts "❌ Signature verification failed for #{username}"
+      socket.write("R")
+    end
+  rescue => e
+    puts "❌ Exception during migration verification: #{e}"
+    socket.write("R")
+  end
 end
 
 # Run the server

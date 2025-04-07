@@ -5,7 +5,7 @@ from identity import create_identity, sign_session_key, send_identity_to_ruby  #
 from storage import SecureStorage
 import os
 from getpass import getpass
-
+from identity import rotate_public_key, notify_peers_of_rotation
 import subprocess
 import socket
 import sys
@@ -86,6 +86,7 @@ def main(start_server=True):
         print("3. 🔐 Create Identity")
         print("4. Request File List")
         print("5. 🔓 Decrypt Stored File")
+        print("6. Rotate Identity Key")
         print("0. Exit")
 
         choice = input("Enter choice: ")
@@ -148,6 +149,10 @@ def main(start_server=True):
                 print("❌ Invalid selection.")
         elif choice == "5":
             decrypt_stored_file()
+        elif choice =="6":
+            migrate_msg = rotate_public_key()
+            if migrate_msg:
+                notify_peers_of_rotation(migrate_msg)
         elif choice == "0":
             stop_advertisement()
             break

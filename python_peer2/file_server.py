@@ -5,7 +5,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from encryption_utils import encrypt_file
-from auth_handler import verify_identity
+from auth_handler import verify_identity, handle_migration
 from storage import SecureStorage
 from getpass import getpass
 
@@ -51,6 +51,7 @@ class FileServer:
                     print("✅ Peer authenticated successfully.")
                 else:
                     print("❌ Authentication failed.")
+
 
             
 

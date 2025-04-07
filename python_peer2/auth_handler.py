@@ -66,3 +66,35 @@ def verify_identity(client_socket, session_key):
     print(f"✅ Verified identity of peer '{username}'.")
     client_socket.send(b"A")  # Accept
     return True
+
+def handle_migration(data):
+    username = data["username"]
+    new_key_pem = data["new_key"]
+    signature = base64.b64decode(data["signature"])
+
+    known_peers = load_known_peers()
+
+    if username not in known_peers:
+        print(f"❌ Cannot process key migration for unknown peer '{username}'.")
+        return False
+
+    old_pubkey_pem = known_peers[username]
+    old_pubkey = serialization.load_pem_public_key(old_pubkey_pem.encode())
+
+    try:
+        old_pubkey.verify(
+            signature,
+            new_key_pem.encode(),
+            ec.ECDSA(hashes.SHA256())
+        )
+    except Exception as e:
+        print(f"❌ Signature verification failed: {e}")
+        return False
+
+    known_peers[username] = new_key_pem
+    with open(KNOWN_PEERS_PATH, "w") as f:
+        json.dump(known_peers, f, indent=2)
+
+    print(f"🔐 Peer '{username}' has rotated their key. New public key stored.")
+    return True
+
