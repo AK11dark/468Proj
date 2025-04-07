@@ -6,6 +6,7 @@ Basic usage:
 3. Once you create an identity, you can send a file request which will save you as a contact.
 4. 
 
+Criteria Satisfaction:
 
 2. Mutual Auth
 🔐 test_mutual_auth_success: Performs a full key exchange, signs a session key with the user's ECDSA key, and sends it to the Ruby peer for verification. A successful response confirms the peer trusts the signature.
