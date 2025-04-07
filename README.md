@@ -1,12 +1,13 @@
 Basic usage:
 
 1. Open code using github codespace and install necessary python packages. cryptography and zeroconf.
-2. open 2 terminals, cd one of them to python_peer2 and the other to ruby_peer2
-3. start python with python start.py
-4. start ruby with ruby main.rb
-5. Upon first startup, you need to create an identity, this shares a username and ECDSA public key which the other client will keep track of in the future.
+2. Ensure that identity.json, known_peers.json and ecdsa_key.pem all do not exist in both folders before starting
+3. open 2 terminals, cd one of them to python_peer2 and the other to ruby_peer2
+4. start python with python start.py
+5. start ruby with ruby main.rb
+6. Upon first startup, you need to create an identity, this shares a username and ECDSA public key which the other client will keep track of in the future.
 (Ensure who you think is sending the first file request is actually them by contacting them outside of the P2P module, as it uses Trust on First Use.)
-6. Once you create an identity, you can send a file request which will save you as a contact.
+7. Once you create an identity, you can send a file request which will save you as a contact.
 
 
 Criteria Satisfaction:
