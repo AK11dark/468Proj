@@ -5,6 +5,7 @@ require_relative "client"        # Add client for file request
 require_relative "identity"
 require_relative "storage"       # Add storage for secure file handling
 require 'io/console'             # For password input without echoing
+require 'json'
 
 # Helper method for password input
 def get_password(prompt="Enter password: ")
@@ -221,6 +222,28 @@ def list_files_in_directory(directory, with_header = true)
   end
 end
 
+# Make sure the known_peers.json file exists
+def ensure_known_peers_file_exists
+  begin
+    current_dir = Dir.pwd
+    file_path = File.join(current_dir, 'known_peers.json')
+    
+    unless File.exist?(file_path)
+      puts "Creating known_peers.json file at #{file_path}"
+      File.write(file_path, "{}")
+      puts "✅ known_peers.json initialized successfully"
+    end
+    return true
+  rescue => e
+    puts "❌ Error initializing known_peers.json: #{e.class} - #{e.message}"
+    puts e.backtrace
+    return false
+  end
+end
+
+# Ensure known_peers.json file exists at startup
+ensure_known_peers_file_exists
+
 # Start OOP FileServer in a thread
 file_server = FileServer.new
 Thread.new do
@@ -249,6 +272,7 @@ loop do
   puts "6. 🔓 Decrypt Stored File"
   puts "7. 🔒 Encrypt a File"
   puts "8. 📂 List Stored Files"
+  puts "9. 🌐 Find File from Alternative Source"
   puts "0. Exit"
   print "> "
 
@@ -296,8 +320,10 @@ loop do
         # 🧠 Perform identity authentication
         if identity.send_authentication(selected_peer[:ip], selected_peer[:port], session_key)
           puts "Authentication successful."
+          # Get file list first to store hashes
+          request_file_list(selected_peer[:ip], selected_peer[:port], selected_peer[:name])
           # ✅ Proceed with file request only if authenticated
-          request_file(selected_peer[:ip], selected_peer[:port], filename, session_key)
+          request_file(selected_peer[:ip], selected_peer[:port], filename, session_key, selected_peer[:name])
         else
           puts "❌ Identity verification failed before file request "
         end
@@ -319,7 +345,7 @@ loop do
       if peer_number >= 0 && peer_number < peers.length
         selected_peer = peers[peer_number]
         puts "\n📡 Requesting file list from #{selected_peer[:ip]}..."
-        request_file_list(selected_peer[:ip], selected_peer[:port])
+        request_file_list(selected_peer[:ip], selected_peer[:port], selected_peer[:name])
       else
         puts "Invalid selection."
       end
@@ -388,6 +414,138 @@ loop do
     encrypt_file
   when "8"
     list_all_stored_files
+  when "9"
+    # Finding files from alternative sources with hash verification
+    unless File.exist?('known_peers.json')
+      puts "❌ No known peers data. Please use option 3 to fetch file lists first."
+      next
+    end
+    
+    begin
+      # Load known peers to find files
+      peers_data = JSON.parse(File.read('known_peers.json'))
+      
+      # Create a mapping of peers having each file
+      available_files = {}
+      peers_data.each do |peer_name, peer_info|
+        if peer_info.is_a?(Hash) && peer_info.key?('files')
+          peer_info['files'].each do |file_info|
+            if file_info.is_a?(Hash)
+              filename = file_info['name']
+              available_files[filename] ||= []
+              available_files[filename] << {
+                'peer' => peer_name,
+                'hash' => file_info['hash']
+              }
+            end
+          end
+        end
+      end
+      
+      if available_files.empty?
+        puts "❌ No files found in known peers."
+        next
+      end
+      
+      # Show available files
+      puts "\n📃 Files available from all known peers:"
+      file_list = available_files.keys
+      file_list.each_with_index do |filename, i|
+        peers_with_file = available_files[filename].map { |info| info['peer'] }
+        puts "#{i + 1}. #{filename} (Available from: #{peers_with_file.join(', ')})"
+      end
+      
+      # Ask which file to download
+      print "\nWhich file do you want to download? (number): "
+      file_idx = gets.chomp.to_i - 1
+      if file_idx < 0 || file_idx >= file_list.size
+        puts "❌ Invalid selection."
+        next
+      end
+      
+      filename = file_list[file_idx]
+      
+      # Show available sources for this file
+      puts "\n🌐 Available sources for '#{filename}':"
+      sources = available_files[filename]
+      sources.each_with_index do |source, i|
+        puts "#{i + 1}. #{source['peer']} (Hash: #{source['hash']})"
+      end
+      
+      # Ask which source to use
+      print "\nWhich source do you want to use? (number): "
+      source_idx = gets.chomp.to_i - 1
+      if source_idx < 0 || source_idx >= sources.size
+        puts "❌ Invalid selection."
+        next
+      end
+      
+      selected_source = sources[source_idx]
+      original_peer = selected_source['peer']
+      
+      # Now find an active peer to download from
+      active_peers = PeerFinder.discover_peers(5)
+      active_peer_names = active_peers.map { |p| p[:name] }
+      
+      if active_peer_names.include?(original_peer)
+        # Original peer is online, download directly
+        puts "✅ Original peer '#{original_peer}' is online. Downloading directly."
+        peer = active_peers.find { |p| p[:name] == original_peer }
+        
+        # Perform key exchange with the peer
+        session_key = perform_key_exchange(peer[:ip], peer[:port])
+        if session_key.nil?
+          puts "❌ Key exchange failed."
+          next
+        end
+        
+        identity = PeerIdentity.new
+        identity.setup
+        if identity.send_authentication(peer[:ip], peer[:port], session_key)
+          request_file(peer[:ip], peer[:port], filename, session_key, original_peer)
+        else
+          puts "❌ Identity verification failed"
+        end
+      else
+        # Original peer is offline, try to find alternative source
+        puts "⚠️ Original peer '#{original_peer}' is offline. Looking for alternative sources..."
+        
+        # Ask which active peer to try
+        puts "\n🔍 Active peers that might have the file:"
+        active_peers.each_with_index do |peer, i|
+          puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
+        end
+        
+        print "\nWhich peer to try? (number): "
+        peer_idx = gets.chomp.to_i - 1
+        if peer_idx < 0 || peer_idx >= active_peers.size
+          puts "❌ Invalid selection."
+          next
+        end
+        
+        alternative_peer = active_peers[peer_idx]
+        
+        # Perform key exchange with the alternative peer
+        session_key = perform_key_exchange(alternative_peer[:ip], alternative_peer[:port])
+        if session_key.nil?
+          puts "❌ Key exchange failed."
+          next
+        end
+        
+        identity = PeerIdentity.new
+        identity.setup
+        if identity.send_authentication(alternative_peer[:ip], alternative_peer[:port], session_key)
+          puts "⚠️ Downloading from alternative peer '#{alternative_peer[:name]}' with verification against original peer '#{original_peer}'"
+          request_file(alternative_peer[:ip], alternative_peer[:port], filename, session_key, original_peer)
+        else
+          puts "❌ Identity verification failed"
+        end
+      end
+      
+    rescue => e
+      puts "❌ Error: #{e.message}"
+      puts e.backtrace.join("\n")
+    end
   when "0"
     puts "\n👋 Exiting."
     exit

@@ -217,14 +217,36 @@ def handle_file_list_request(socket)
   end
 
   files = Dir.entries(dir).select { |f| File.file?(File.join(dir, f)) }
+  
+  # Create a list of files with their hashes
+  file_list = files.map do |filename|
+    file_path = File.join(dir, filename)
+    # Calculate SHA-256 hash of file
+    file_hash = calculate_file_hash(file_path)
+    { name: filename, hash: file_hash }
+  end
 
-  response = files.to_json
+  response = file_list.to_json
   socket.write("L")
   socket.write([response.bytesize].pack("N"))
   socket.write(response)
 
-  puts "📃 Sent file list: #{files.inspect}"
+  puts "📃 Sent file list with hashes: #{file_list.inspect}"
 end
+
+def calculate_file_hash(file_path)
+  # Calculate SHA-256 hash of a file
+  digest = OpenSSL::Digest::SHA256.new
+  File.open(file_path, 'rb') do |f|
+    buffer = ""
+    # Read the file in chunks to handle large files
+    while f.read(4096, buffer)
+      digest.update(buffer)
+    end
+  end
+  digest.hexdigest
+end
+
 def handle_key_migration(socket)
   len = socket.read(4).unpack1("N")
   payload = socket.read(len)

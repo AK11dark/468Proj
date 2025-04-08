@@ -225,22 +225,35 @@ class FileServer:
             # Show encrypted files with their .enc extension removed for clarity
             file_list = []
             for f in files:
-                if os.path.isfile(os.path.join("Files", f)):
+                file_path = os.path.join("Files", f)
+                if os.path.isfile(file_path):
+                    # Calculate SHA-256 hash of the file
+                    file_hash = self.calculate_file_hash(file_path)
+                    
                     if f.endswith('.enc'):
                         # Add both the encrypted name and the original name
                         original_name = f.rsplit('.enc', 1)[0]
-                        file_list.append(f"{original_name} 🔒")
+                        file_list.append({"name": f"{original_name} 🔒", "hash": file_hash})
                     else:
-                        file_list.append(f)
+                        file_list.append({"name": f, "hash": file_hash})
 
             response = json.dumps(file_list).encode('utf-8')
             client_socket.send(b"L")
             client_socket.send(len(response).to_bytes(4, 'big'))
             client_socket.send(response)
 
-            print("[Python File Server] 📃 Sent file list to peer.")
+            print("[Python File Server] 📃 Sent file list with hashes to peer.")
         except Exception as e:
             print(f"[Python File Server] ❌ Error sending file list: {e}")
+            
+    def calculate_file_hash(self, file_path):
+        """Calculate SHA-256 hash of a file"""
+        sha256 = hashes.Hash(hashes.SHA256())
+        with open(file_path, 'rb') as f:
+            # Read file in chunks to handle large files
+            for chunk in iter(lambda: f.read(4096), b''):
+                sha256.update(chunk)
+        return sha256.finalize().hex()
 
 
 if __name__ == "__main__":
