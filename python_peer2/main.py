@@ -157,6 +157,7 @@ def main(start_server=True):
     
     # Store our own service name to prevent self-discovery
     set_own_service_name(service_name)
+    print(f"👤 Your unique service name: {service_name}")
     
     # Initialize known_peers.json file
     ensure_known_peers_file_exists()

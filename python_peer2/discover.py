@@ -9,7 +9,7 @@ def set_own_service_name(service_name):
     """Set the service name of this client to filter out self-discovery"""
     global OWN_SERVICE_NAME
     OWN_SERVICE_NAME = service_name
-    print(f"Setting own service name: {OWN_SERVICE_NAME}")
+    # Only print this in debug mode or when running discover.py directly
 
 class PeerListener(ServiceListener):
     def __init__(self):

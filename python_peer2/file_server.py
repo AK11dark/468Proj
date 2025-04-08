@@ -188,7 +188,6 @@ class FileServer:
             if not session_key:
                 print(f"⚠️ No session key found for {client_address[0]}, using fallback encryption")
                 # Generate a temporary key if needed
-                import os
                 session_key = os.urandom(32)
                 
             encrypted = encrypt_file(file_content, session_key)
@@ -241,7 +240,6 @@ class FileServer:
                 if not session_key:
                     print(f"⚠️ No session key found for {client_address[0]}, using fallback encryption")
                     # Generate a temporary key if needed
-                    import os
                     session_key = os.urandom(32)
                 
                 encrypted = encrypt_file(file_content, session_key)
