@@ -12,46 +12,128 @@ BASE_DIR = Path(__file__).parent.resolve()
 KEY_PATH = BASE_DIR / "ecdsa_key.pem"
 IDENTITY_PATH = BASE_DIR / "identity.json"
 
+def identity_exists():
+    """Check if both identity file and key file exist"""
+    identity_exists = IDENTITY_PATH.exists()
+    key_exists = KEY_PATH.exists()
+    
+    if identity_exists and key_exists:
+        return True
+    elif identity_exists or key_exists:
+        # Partial/broken identity state
+        print("⚠️ WARNING: Identity files in inconsistent state.")
+        print(f"- Identity file: {'✅ Exists' if identity_exists else '❌ Missing'}")
+        print(f"- Key file: {'✅ Exists' if key_exists else '❌ Missing'}")
+        return False
+    else:
+        return False
+
+def cleanup_identity():
+    """Remove any existing identity files"""
+    try:
+        if IDENTITY_PATH.exists():
+            IDENTITY_PATH.unlink()
+            print(f"✅ Removed {IDENTITY_PATH.name}")
+        
+        if KEY_PATH.exists():
+            KEY_PATH.unlink()
+            print(f"✅ Removed {KEY_PATH.name}")
+            
+        return True
+    except Exception as e:
+        print(f"❌ Error cleaning up identity files: {e}")
+        return False
+
+def ensure_identity_exists():
+    """Check if identity exists, and create one if it doesn't"""
+    if not identity_exists():
+        print("❗ No identity found or identity files are incomplete.")
+        
+        # Clean up any partial identity files first
+        if IDENTITY_PATH.exists() or KEY_PATH.exists():
+            cleanup_choice = input("Clean up partial identity files? (y/n): ").strip().lower()
+            if cleanup_choice == 'y':
+                if not cleanup_identity():
+                    print("❌ Failed to clean up identity files. Cannot proceed.")
+                    return False
+            else:
+                print("❌ Cannot proceed with partial identity files.")
+                return False
+                
+        create_choice = input("Create a new identity? (y/n): ").strip().lower()
+        if create_choice == 'y':
+            create_identity()
+            # Verify that identity was created successfully
+            if identity_exists():
+                return True
+            else:
+                print("❌ Failed to create identity.")
+                return False
+        else:
+            print("❌ Cannot proceed without an identity.")
+            return False
+    return True
+
 def create_identity():
     # Check if identity already exists
-    if KEY_PATH.exists() or IDENTITY_PATH.exists():
-        print("❗ Identity already exists. Delete existing files to regenerate.")
-        return
+    identity_file_exists = IDENTITY_PATH.exists()
+    key_file_exists = KEY_PATH.exists()
+    
+    if identity_file_exists or key_file_exists:
+        print("⚠️ Some identity files already exist.")
+        print(f"- Identity file: {'✅ Exists' if identity_file_exists else '❌ Missing'}")
+        print(f"- Key file: {'✅ Exists' if key_file_exists else '❌ Missing'}")
+        
+        cleanup_choice = input("Clean up existing files and create new identity? (y/n): ").strip().lower()
+        if cleanup_choice == 'y':
+            if cleanup_identity():
+                print("✅ Previous identity cleaned up. Creating new identity...")
+            else:
+                print("❌ Failed to clean up existing identity files.")
+                return False
+        else:
+            print("❌ Cannot create new identity without cleaning up existing files.")
+            return False
 
-    # Generate EC private key
-    key = ec.generate_private_key(ec.SECP256R1())
-    with open(KEY_PATH, "wb") as f:
-        f.write(key.private_bytes(
+    try:
+        # Generate EC private key
+        key = ec.generate_private_key(ec.SECP256R1())
+        with open(KEY_PATH, "wb") as f:
+            f.write(key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+        print(f"🔐 New ECDSA key saved to {KEY_PATH.name}")
+
+        # Ask for username
+        username = input("Enter your username: ").strip()
+
+        # Extract public key in PEM format
+        pubkey = key.public_key()
+        pub_pem = pubkey.public_bytes(
             encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
-        ))
-    print(f"🔐 New ECDSA key saved to {KEY_PATH.name}")
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode()
 
-    # Ask for username
-    username = input("Enter your username: ").strip()
+        # Save identity information
+        with open(IDENTITY_PATH, "w") as f:
+            json.dump({
+                "username": username,
+                "public_key": pub_pem
+            }, f)
+        print(f"👤 Identity saved to {IDENTITY_PATH.name}")
 
-    # Extract public key in PEM format
-    pubkey = key.public_key()
-    pub_pem = pubkey.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode()
-
-    # Save identity information
-    with open(IDENTITY_PATH, "w") as f:
-        json.dump({
-            "username": username,
-            "public_key": pub_pem
-        }, f)
-    print(f"👤 Identity saved to {IDENTITY_PATH.name}")
-
-    # Print identity info for sharing
-    print("\n👤 Your identity information (share with peers):")
-    print(f"Username: {username}")
-    print("Public Key:\n" + pub_pem)
-
-
+        # Print identity info for sharing
+        print("\n👤 Your identity information (share with peers):")
+        print(f"Username: {username}")
+        print("Public Key:\n" + pub_pem)
+        
+        return True
+    except Exception as e:
+        print(f"❌ Error creating identity: {e}")
+        cleanup_identity()  # Clean up any partial files created
+        return False
 
 def sign_session_key(session_key: bytes):
     # Load private key

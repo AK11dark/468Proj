@@ -161,6 +161,17 @@ class SecureStorage:
         self.storage_dir = storage_dir
         os.makedirs(storage_dir, exist_ok=True)
     
+    def store_file(self, file_content, filename):
+        """Store file content without encryption"""
+        file_path = os.path.join(self.storage_dir, filename)
+        
+        # Write content directly to file
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+        
+        # Return path to the file
+        return file_path
+    
     def store_encrypted_file(self, file_content, filename, password):
         """Store file content with encryption"""
         temp_path = os.path.join(self.storage_dir, "temp_" + filename)

@@ -61,24 +61,26 @@ def request_file(ip, port, filename, session_key):
             print("❌ Decryption failed:", e)
             return
 
-        # Ask user for a password to encrypt the file locally
-        print("\n🔒 The file will be encrypted locally using a password")
-        password = getpass("Enter password for local encryption: ")
-        if not password:
-            print("❌ Password cannot be empty")
-            # Save the file without encryption if no password provided
-            save_path = f"Received/{filename}"
-            with open(save_path, 'wb') as f:
-                f.write(plaintext)
-            print(f"✅ File '{filename}' saved without encryption to {save_path}")
-            return
-            
-        # Use SecureStorage to store the file with encryption
+        # Ask if the user wants to encrypt the file
         storage = SecureStorage()
-        encrypted_path = storage.store_encrypted_file(plaintext, filename, password)
-
-        print(f"✅ File '{filename}' encrypted with password and saved to {encrypted_path}")
-        print("To decrypt this file later, use the same password.")
+        encrypt_choice = input("\n🔒 Do you want to encrypt the file locally? (y/n): ").strip().lower()
+        
+        if encrypt_choice == 'y':
+            # Ask user for a password to encrypt the file locally
+            password = getpass("Enter password for local encryption: ")
+            if not password:
+                print("❌ Password cannot be empty, saving without encryption")
+                save_path = storage.store_file(plaintext, filename)
+                print(f"✅ File '{filename}' saved without encryption to {save_path}")
+            else:
+                # Use SecureStorage to store the file with encryption
+                encrypted_path = storage.store_encrypted_file(plaintext, filename, password)
+                print(f"✅ File '{filename}' encrypted with password and saved to {encrypted_path}")
+                print("To decrypt this file later, use the same password.")
+        else:
+            # Save without encryption
+            save_path = storage.store_file(plaintext, filename)
+            print(f"✅ File '{filename}' saved without encryption to {save_path}")
 
 def perform_key_exchange_with_ruby(peer_ip, peer_port):
     print("[Python Client] 🧠 Generating EC key pair...")
