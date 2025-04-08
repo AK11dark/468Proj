@@ -1,1 +1,0 @@
-Hello from Ruby peer! This is a sample text file. 
