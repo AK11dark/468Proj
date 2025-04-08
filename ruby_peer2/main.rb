@@ -28,6 +28,8 @@ loop do
   puts "2. Request File"
   puts "3. View File List"
   puts "4. Create an identity to share with peer"
+  puts "5. Rotate Identity"
+
   puts "0. Exit"
   print "> "
 
@@ -106,6 +108,61 @@ loop do
   when "4"
     identity = PeerIdentity.new
     identity.create_identity
+  # Add this option to the menu loop
+  when "5"
+    identity = PeerIdentity.new
+    migrate_msg = identity.rotate_key
+    
+    if migrate_msg.nil?
+      puts "❌ Failed to rotate key."
+      next
+    end
+
+    peers = PeerFinder.discover_peers(5)
+    if peers.empty?
+      puts "❌ No peers found to notify."
+      next
+    end
+
+  puts "\nChoose peer(s) to notify:"
+  peers.each_with_index do |peer, i|
+    puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
+  end
+  print "Enter peer number(s) separated by commas, or 'a' for all: "
+  input = gets.chomp
+
+  selected_peers =
+    if input.strip.downcase == 'a'
+      peers
+    else
+      begin
+        input.split(',').map { |i| peers[i.strip.to_i - 1] }.compact
+      rescue
+        puts "❌ Invalid selection."
+        next
+      end
+    end
+
+  selected_peers.each do |peer|
+    begin
+      socket = TCPSocket.new(peer[:ip], peer[:port])
+      payload = migrate_msg.to_json
+      socket.write("M")
+      socket.write([payload.bytesize].pack("N"))
+      socket.write(payload)
+      response = socket.read(1)
+
+      if response == "M"
+        puts "✅ #{peer[:name]} accepted your new key."
+      else
+        puts "⚠️ #{peer[:name]} rejected your migration."
+      end
+    rescue => e
+      puts "❌ Failed to notify #{peer[:name]}: #{e}"
+    ensure
+      socket.close if socket
+    end
+  end
   
   when "0"
     puts "\n👋 Exiting."

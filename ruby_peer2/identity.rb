@@ -73,6 +73,52 @@ class PeerIdentity
     }.to_json
   end
 
+  def rotate_key
+    unless File.exist?(IDENTITY_PATH) && File.exist?(KEY_PATH)
+      puts "❌ Identity or private key not found."
+      return nil
+    end
+
+    # Load current identity info
+    identity = JSON.parse(File.read(IDENTITY_PATH))
+    username = identity["username"]
+
+    # ✅ Load old private key BEFORE overwriting it
+    old_key = OpenSSL::PKey::EC.new(File.read(KEY_PATH))
+
+    # 🔐 Generate new ECDSA key pair
+    new_key = OpenSSL::PKey::EC.generate("prime256v1")
+    new_pubkey_only = OpenSSL::PKey::EC.new(new_key.group)
+    new_pubkey_only.public_key = new_key.public_key
+
+    # ✅ Normalize the new public key PEM to avoid newline issues
+    new_pub_pem = new_pubkey_only.to_pem.gsub("\r\n", "\n")
+
+    puts "✍️ new_pub_pem being signed:"
+    puts new_pub_pem.inspect
+    puts "🔑 SHA256:", OpenSSL::Digest::SHA256.hexdigest(new_pub_pem)
+
+    # ✅ Sign the normalized PEM with old private key using SHA256
+    digest = OpenSSL::Digest::SHA256.new
+    signature = old_key.dsa_sign_asn1(digest.digest(new_pub_pem))
+
+    # ✅ Now save the new private key and updated identity
+    File.write(KEY_PATH, new_key.to_pem)
+    File.write(IDENTITY_PATH, JSON.pretty_generate({
+      "username" => username,
+      "public_key" => new_pub_pem
+    }))
+
+    puts "🔁 Key rotation complete. New public key stored."
+
+    {
+      "username" => username,
+      "new_key" => new_pub_pem,
+      "signature" => Base64.strict_encode64(signature)
+    }
+  end
+
+
   # Send authentication payload to peer after ECDH
   def send_authentication(peer_ip, peer_port, session_key)
     digest = OpenSSL::Digest::SHA256.digest(session_key)

@@ -8,7 +8,7 @@ from encryption_utils import encrypt_file
 from auth_handler import verify_identity, handle_migration
 from storage import SecureStorage
 from getpass import getpass
-
+from auth_handler import handle_migration
 
 
 class FileServer:
@@ -51,6 +51,14 @@ class FileServer:
                     print("✅ Peer authenticated successfully.")
                 else:
                     print("❌ Authentication failed.")
+            elif msg_type == b"M":
+                length = int.from_bytes(client_socket.recv(4), 'big')
+                payload = client_socket.recv(length)
+                message = json.loads(payload.decode("utf-8"))
+
+                
+                success = handle_migration(message)
+                client_socket.send(b"M" if success else b"R")
 
 
             

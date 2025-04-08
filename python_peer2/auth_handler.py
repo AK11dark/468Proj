@@ -4,6 +4,7 @@ import base64
 import os
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+import traceback
 
 KNOWN_PEERS_PATH = "known_peers.json"
 
@@ -13,6 +14,10 @@ def load_known_peers():
             return json.load(f)
     return {}
 
+def save_known_peers(peers):
+    with open(KNOWN_PEERS_PATH, "w") as f:
+        json.dump(peers, f, indent=2)
+        
 def save_known_peer(username, public_key_pem):
     peers = load_known_peers()
     peers[username] = public_key_pem
@@ -73,28 +78,37 @@ def handle_migration(data):
     signature = base64.b64decode(data["signature"])
 
     known_peers = load_known_peers()
+    print("🔍 Received new_key PEM:")
+    print(repr(new_key_pem))
 
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(new_key_pem.encode())
+    print("🔑 SHA256 of new_key PEM:", digest.finalize().hex())
     if username not in known_peers:
-        print(f"❌ Cannot process key migration for unknown peer '{username}'.")
+        print(f"❌ Cannot process migration: unknown peer '{username}'")
         return False
-
-    old_pubkey_pem = known_peers[username]
-    old_pubkey = serialization.load_pem_public_key(old_pubkey_pem.encode())
 
     try:
+        # Load the old trusted key
+        old_key_pem = known_peers[username]
+        old_pubkey = serialization.load_pem_public_key(old_key_pem.encode())
+
+        # Verify signature on new public key
         old_pubkey.verify(
             signature,
-            new_key_pem.encode(),
+            new_key_pem.encode(),  # Signatures are over the full PEM string
             ec.ECDSA(hashes.SHA256())
         )
+
+        # If verification passes, update the stored key
+        known_peers[username] = new_key_pem
+        save_known_peers(known_peers)
+
+        print(f"✅ Key migration verified and updated for peer '{username}'")
+        return True
+
     except Exception as e:
-        print(f"❌ Signature verification failed: {e}")
+        print(f"❌ Migration verification failed: {e}")
+        traceback.print_exc()
         return False
-
-    known_peers[username] = new_key_pem
-    with open(KNOWN_PEERS_PATH, "w") as f:
-        json.dump(known_peers, f, indent=2)
-
-    print(f"🔐 Peer '{username}' has rotated their key. New public key stored.")
-    return True
 
