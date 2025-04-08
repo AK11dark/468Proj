@@ -6,56 +6,14 @@ require 'digest'
 
 
 def request_file(ip, port, filename, session_key, original_peer_name=nil)
-  # Check if already authenticated with this peer
-  authenticated = false
-  peer_auth_data = nil
-  
-  if original_peer_name
-    auth_file_path = File.join(Dir.pwd, 'authenticated_peers.json')
-    if File.exist?(auth_file_path)
-      begin
-        auth_data = JSON.parse(File.read(auth_file_path))
-        # Handle various possible peer name formats
-        peer_keys = [original_peer_name]
-        
-        # Add variations of the name for matching
-        if original_peer_name.include?('_peer._tcp.local')
-          base_name = original_peer_name.split('._peer._tcp.local').first
-          peer_keys << base_name
-          peer_keys << "#{base_name}._peer._tcp.local"
-        end
-        
-        # Try to find any variation of the peer name in the authentication data
-        matched_key = peer_keys.find { |key| auth_data.key?(key) }
-        
-        if matched_key
-          peer_auth_data = auth_data[matched_key]
-          auth_time = Time.at(peer_auth_data["last_auth"]).to_s
-          puts "🔑 Previously authenticated with #{original_peer_name} at #{auth_time}"
-          authenticated = true
-        end
-      rescue JSON::ParserError => e
-        puts "⚠️ Error parsing authentication data: #{e.message}"
-      end
-    end
-  end
-  
-  unless authenticated
-    puts "⚠️ Not yet authenticated with this peer."
-    puts "ℹ️ Consider using option 10 from the main menu to authenticate first."
-  end
-  
-  puts "🚀 Sending file request to #{ip}:#{port} for #{filename}"
   socket = TCPSocket.new(ip, port)
   request = { "file_name" => filename }
   socket.write("F")
   socket.write([request.to_json.bytesize].pack('N'))
   socket.write(request.to_json)
-  puts "📤 Sent file request"
 
   # Expect "F" + metadata
   response_type = socket.read(1)
-  puts "📥 Received response type: #{response_type.inspect}"
   if response_type != "F"
     puts "❌ Unexpected response"
     socket.close
@@ -64,15 +22,11 @@ def request_file(ip, port, filename, session_key, original_peer_name=nil)
 
   # Read status JSON
   response_len = socket.read(4).unpack1('N')
-  puts "📥 Response length: #{response_len}"
   response = JSON.parse(socket.read(response_len))
-  puts "📥 Response: #{response.inspect}"
 
   if response["status"] == "accepted"
-    puts "✅ File request accepted"
     # Expect "D" next
     data_type = socket.read(1)
-    puts "📥 Data type: #{data_type.inspect}"
     if data_type != "D"
       puts "❌ Expected file data block"
       socket.close
@@ -82,17 +36,13 @@ def request_file(ip, port, filename, session_key, original_peer_name=nil)
     # --- Encrypted file parts ---
     iv_len = socket.read(4).unpack1('N')
     iv = socket.read(iv_len)
-    puts "📥 Received IV (#{iv_len} bytes)"
 
     tag_len = socket.read(4).unpack1('N')
     tag = socket.read(tag_len)
-    puts "📥 Received Tag (#{tag_len} bytes)"
 
     ciphertext_len = socket.read(4).unpack1('N')
-    puts "📥 Ciphertext length: #{ciphertext_len}"
     ciphertext = socket.read(ciphertext_len)
-    puts "📥 Received ciphertext (#{ciphertext.bytesize} bytes)"
-    
+
     # --- Decrypt ---
     cipher = OpenSSL::Cipher.new('aes-256-gcm')
     cipher.decrypt
@@ -101,9 +51,7 @@ def request_file(ip, port, filename, session_key, original_peer_name=nil)
     cipher.auth_tag = tag
 
     begin
-      puts "🔓 Attempting to decrypt..."
       plaintext = cipher.update(ciphertext) + cipher.final
-      puts "✅ Decryption successful"
       
       # Verify file hash if original_peer_name is provided
       if original_peer_name
@@ -217,30 +165,41 @@ def request_file_list(peer_ip, peer_port, peer_name = nil)
   # If peer_name is provided, store the file list with hashes in known_peers.json
   if peer_name
     save_peer_file_list(peer_name, file_list)
+    puts "💾 Saved file list for peer '#{peer_name}'"
   end
 
   socket.close
   return file_list
 end
 
-def save_peer_file_list(peer_name, file_list, silent=false)
-  # File path for known_peers.json
+def save_peer_file_list(peer_name, file_list)
+  # Print current working directory for debugging
   current_dir = Dir.pwd
+  puts "Working directory: #{current_dir}"
+  
+  # File path for known_peers.json
   file_path = File.join(current_dir, 'known_peers.json')
+  puts "Will save to: #{file_path}"
   
   # Load existing known_peers.json
   peers_data = {}
   if File.exist?(file_path)
     begin
       peers_data = JSON.parse(File.read(file_path))
+      puts "Loaded existing peers data with #{peers_data.size} entries"
     rescue JSON::ParserError
-      puts "⚠️ Error parsing existing known_peers.json, will create new file" unless silent
+      puts "⚠️ Error parsing existing known_peers.json, will create new file"
     end
+  else
+    puts "File doesn't exist yet, will create new one"
   end
   
   # Add or update file_list for this peer
   unless peers_data.key?(peer_name)
     peers_data[peer_name] = {}
+    puts "Adding new peer: #{peer_name}"
+  else
+    puts "Updating existing peer: #{peer_name}"
   end
   
   # Keep the public key if it exists
@@ -258,22 +217,18 @@ def save_peer_file_list(peer_name, file_list, silent=false)
   # Save updated data
   begin
     File.write(file_path, JSON.pretty_generate(peers_data))
-    puts "💾 Saved file list for peer '#{peer_name}'" unless silent
-    return true
+    puts "✅ Successfully saved peer file list to #{file_path}"
   rescue Errno::EACCES
-    puts "❌ Permission denied when saving peer file list" unless silent
-    return false
+    puts "❌ Permission denied when writing to #{file_path}"
   rescue => e
-    puts "❌ Error saving peer file list: #{e.class} - #{e.message}" unless silent
-    return false
+    puts "❌ Error writing to #{file_path}: #{e.class} - #{e.message}"
   end
 rescue => e
-  puts "❌ Error saving peer file list: #{e.class} - #{e.message}" unless silent
-  return false
+  puts "❌ Error saving peer file list: #{e.class} - #{e.message}"
+  puts e.backtrace
 end
 
 def verify_file_hash(filename, file_content, peer_name)
-  puts "🔍 Verifying file hash for #{filename} from peer #{peer_name}"
   # Get absolute path to known_peers.json
   current_dir = Dir.pwd
   file_path = File.join(current_dir, 'known_peers.json')
@@ -281,9 +236,6 @@ def verify_file_hash(filename, file_content, peer_name)
   # Load known_peers.json
   unless File.exist?(file_path)
     puts "❌ known_peers.json does not exist at #{file_path}"
-    
-    # Try to get the file list first if the file doesn't exist
-    puts "🔄 Fetching file list to verify hash..."
     return false
   end
     

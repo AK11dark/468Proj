@@ -1,8 +1,5 @@
 from zeroconf import ServiceInfo, Zeroconf
 import socket
-import secrets
-import random
-import string
 
 zeroconf_instance = None
 
@@ -13,18 +10,9 @@ def get_local_ip():
     s.close()
     return ip
 
-def generate_random_id(length=4):
-    """Generate a random hex string of specified length, similar to Ruby's SecureRandom.hex"""
-    return secrets.token_hex(length)
-
-def advertise_service(port=5003):
+def advertise_service(name="python-peer", port=5003):
     global zeroconf_instance
     ip = get_local_ip()
-    
-    # Generate a unique name with random component
-    random_id = generate_random_id(4)
-    name = f"python-peer-{random_id}"
-    
     desc = {
         "address": ip,
         "discovery_port": "5000",

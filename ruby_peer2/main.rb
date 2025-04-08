@@ -276,7 +276,6 @@ loop do
   puts "7. 🔒 Encrypt a File"
   puts "8. 📂 List Stored Files"
   puts "9. 🌐 Find File from Alternative Source"
-  puts "10. 🔑 Authenticate with Peer"
   puts "0. Exit"
   print "> "
 
@@ -312,60 +311,25 @@ loop do
         print "\nEnter the filename to request: "
         filename = gets.chomp
 
-        puts "📥 Requesting '#{filename}' from #{selected_peer[:name]} (#{selected_peer[:ip]}:#{selected_peer[:port]})"
+        puts "#{selected_peer[:ip]} #{selected_peer[:port]} #{filename}"
 
-        # Check for existing session key from authentication
-        session_key = nil
-        auth_file_path = File.join(Dir.pwd, 'authenticated_peers.json')
-        authenticated = false
-        
-        if File.exist?(auth_file_path)
-          begin
-            auth_data = JSON.parse(File.read(auth_file_path))
-            
-            # Handle various possible peer name formats
-            peer_keys = [selected_peer[:name]]
-            
-            # Add variations of the name for matching
-            if selected_peer[:name].include?('_peer._tcp.local')
-              base_name = selected_peer[:name].split('._peer._tcp.local').first
-              peer_keys << base_name
-              peer_keys << "#{base_name}._peer._tcp.local"
-            end
-            
-            # Try to find any variation of the peer name in the authentication data
-            matched_key = peer_keys.find { |key| auth_data.key?(key) }
-            
-            if matched_key
-              puts "ℹ️ Using existing authentication with #{selected_peer[:name]}"
-              authenticated = true
-              # We still need to perform a key exchange for this session
-              session_key = perform_key_exchange(selected_peer[:ip], selected_peer[:port])
-            else
-              puts "⚠️ No prior authentication with this peer."
-              puts "ℹ️ Consider using option 10 first to authenticate with this peer."
-              # Proceed anyway with key exchange
-              session_key = perform_key_exchange(selected_peer[:ip], selected_peer[:port])
-            end
-          rescue JSON::ParserError
-            puts "⚠️ Error reading authentication data."
-            session_key = perform_key_exchange(selected_peer[:ip], selected_peer[:port])
-          end
+        # 🔐 Key exchange for signing
+        session_key = perform_key_exchange(selected_peer[:ip], selected_peer[:port])
+        #ECDSA key creation + loading of identity information payload to send over
+        #session key gets signed using ECDSA here for mutual auth
+        identity = PeerIdentity.new
+        identity.setup
+        puts "Performing key exchange..."
+        # 🧠 Perform identity authentication
+        if identity.send_authentication(selected_peer[:ip], selected_peer[:port], session_key)
+          puts "Authentication successful."
+          # Get file list first to store hashes
+          request_file_list(selected_peer[:ip], selected_peer[:port], selected_peer[:name])
+          # ✅ Proceed with file request only if authenticated
+          request_file(selected_peer[:ip], selected_peer[:port], filename, session_key, selected_peer[:name])
         else
-          puts "⚠️ No authentication data found."
-          puts "ℹ️ Consider using option 10 first to authenticate with peers."
-          session_key = perform_key_exchange(selected_peer[:ip], selected_peer[:port])
+          puts "❌ Identity verification failed before file request "
         end
-        
-        if session_key.nil?
-          puts "❌ Key exchange failed. Unable to request file."
-          next
-        end
-        
-        # Request the file without authentication
-        request_file(selected_peer[:ip], selected_peer[:port], filename, session_key, selected_peer[:name])
-      else
-        puts "❌ Invalid selection."
       end
     end
   when "3"
@@ -584,73 +548,6 @@ loop do
     rescue => e
       puts "❌ Error: #{e.message}"
       puts e.backtrace.join("\n")
-    end
-  when "10"
-    peers = PeerFinder.discover_peers(5)
-    if peers.empty?
-      puts "\n⚠️ No peers found."
-    else
-      puts "\nChoose a peer to authenticate with:"
-      peers.each_with_index do |peer, i|
-        puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
-      end
-
-      print "\nEnter the peer number to authenticate with: "
-      peer_number = gets.chomp.to_i - 1
-
-      if peer_number >= 0 && peer_number < peers.length
-        selected_peer = peers[peer_number]
-        puts "\n🔐 Authenticating with #{selected_peer[:name]} (#{selected_peer[:ip]}:#{selected_peer[:port]})..."
-
-        # Perform key exchange
-        session_key = perform_key_exchange(selected_peer[:ip], selected_peer[:port])
-        if session_key.nil?
-          puts "❌ Key exchange failed."
-          next
-        end
-
-        # Authenticate with peer
-        identity = PeerIdentity.new
-        identity.setup
-        if identity.send_authentication(selected_peer[:ip], selected_peer[:port], session_key)
-          puts "✅ Authentication successful with #{selected_peer[:name]}."
-          # Store this successful authentication
-          auth_file_path = File.join(Dir.pwd, 'authenticated_peers.json')
-          authenticated = {}
-          if File.exist?(auth_file_path)
-            begin
-              authenticated = JSON.parse(File.read(auth_file_path))
-            rescue JSON::ParserError
-              puts "⚠️ Error reading authentication data, creating new file."
-            end
-          end
-          
-          # Store with the exact peer name used in discovery
-          authenticated[selected_peer[:name]] = {
-            "ip" => selected_peer[:ip], 
-            "port" => selected_peer[:port],
-            "last_auth" => Time.now.to_i
-          }
-          
-          # Also store a simplified version for easier matching
-          if selected_peer[:name].include?('_peer._tcp.local')
-            base_name = selected_peer[:name].split('._peer._tcp.local').first
-            authenticated[base_name] = {
-              "ip" => selected_peer[:ip], 
-              "port" => selected_peer[:port],
-              "last_auth" => Time.now.to_i
-            }
-          end
-          
-          # Write the updated authentication data
-          File.write(auth_file_path, JSON.pretty_generate(authenticated))
-          puts "📝 Authentication data saved."
-        else
-          puts "❌ Authentication failed with #{selected_peer[:name]}."
-        end
-      else
-        puts "❌ Invalid selection."
-      end
     end
   when "0"
     puts "\n👋 Exiting."

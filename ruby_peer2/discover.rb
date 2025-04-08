@@ -16,34 +16,18 @@ module PeerFinder
 
   def self.discover_peers(timeout = 10)
     socket = UDPSocket.new
-    socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
     discovered_peers = {}
 
     begin
-      # Send multiple PTR queries for faster response
+      # Send PTR query
       query = Resolv::DNS::Message.new(0)
       query.add_question(SERVICE_TYPE, Resolv::DNS::Resource::IN::PTR)
-      encoded_query = query.encode
-      
-      # Send initial burst of queries to increase chances of quick discovery
-      3.times do
-        socket.send(encoded_query, 0, MDNS_ADDR, MDNS_PORT)
-        sleep 0.1 # Small delay between initial queries
-      end
+      socket.send(query.encode, 0, MDNS_ADDR, MDNS_PORT)
 
       end_time = Time.now + timeout
-      check_interval = 0.2 # Shorter polling interval
-      next_query_time = Time.now + 1 # Time to send the next query
 
       while Time.now < end_time
-        # Resend query periodically
-        if Time.now >= next_query_time
-          socket.send(encoded_query, 0, MDNS_ADDR, MDNS_PORT)
-          next_query_time = Time.now + 1
-        end
-
-        # Use a short select timeout to process responses quickly
-        readers, = IO.select([socket], [], [], check_interval)
+        readers, = IO.select([socket], [], [], 1)
         next unless readers
 
         buf, = socket.recvfrom(2048)
@@ -68,11 +52,6 @@ module PeerFinder
           if ip && port
             discovered_peers[name] = { name: name, ip: ip, port: port }
             puts "Discovered peer: #{name} @ #{ip}:#{port}"
-            
-            # Early termination if we've found at least one peer and waited for a short additional time
-            if !discovered_peers.empty? && (Time.now - end_time).abs > (timeout - 2)
-              break
-            end
           end
         end
       end

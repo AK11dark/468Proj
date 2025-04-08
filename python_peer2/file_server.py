@@ -1,7 +1,6 @@
 import socket
 import json
 import os
-import threading
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -17,56 +16,25 @@ class FileServer:
         self.host = host
         self.port = port
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.session_keys = {}  # Dictionary to store session keys per client (IP)
+        self.session_key = None  # Dictionary to store session keys per client (IP)
         self.secure_storage = SecureStorage()
-        self.running = False
-        self.clients = []
 
     def start(self):
         try:
             self.server.bind((self.host, self.port))
             self.server.listen(5)
-            self.running = True
             print(f"[Python File Server] Listening on {self.host}:{self.port}...")
 
-            while self.running: 
-                try:
-                    self.server.settimeout(1.0)  # Set timeout to allow checking running flag
-                    client_socket, client_address = self.server.accept()
-                    print(f"[Python File Server] Connection from {client_address}")
-                    
-                    # Start a new thread to handle this client
-                    client_thread = threading.Thread(
-                        target=self.handle_client,
-                        args=(client_socket, client_address)
-                    )
-                    client_thread.daemon = True
-                    client_thread.start()
-                    self.clients.append(client_thread)
-                except socket.timeout:
-                    continue  # Just a timeout, continue the loop
-                except Exception as e:
-                    if self.running:  # Only print error if we're supposed to be running
-                        print(f"[Python File Server] Error accepting connection: {e}")
-                    
+            while True: 
+                client_socket, client_address = self.server.accept()
+                print(f"[Python File Server] Connection from {client_address}")
+                self.handle_client(client_socket, client_address)
         except OSError as e:
             if e.errno == 98:  # Address already in use
                 print("[Python File Server] Server already running. Continuing with client mode only.")
                 return
             else:
                 raise  # Re-raise if it's a different error
-        finally:
-            if hasattr(self, 'server'):
-                self.server.close()
-
-    def stop(self):
-        """Stop the server cleanly"""
-        self.running = False
-        print("[Python File Server] Stopping server...")
-        # Close the socket to unblock accept()
-        if hasattr(self, 'server'):
-            self.server.close()
 
     def handle_client(self, client_socket, client_address):
         try:
@@ -79,9 +47,7 @@ class FileServer:
             elif msg_type == b"L":
                 self.handle_file_list_request(client_socket)
             elif msg_type == b"A":
-                # Get the session key for this client
-                session_key = self.session_keys.get(client_address[0])
-                if verify_identity(client_socket, session_key):
+                if verify_identity(client_socket, self.session_key):
                     print("✅ Peer authenticated successfully.")
                 else:
                     print("❌ Authentication failed.")
@@ -89,13 +55,18 @@ class FileServer:
                 length = int.from_bytes(client_socket.recv(4), 'big')
                 payload = client_socket.recv(length)
                 message = json.loads(payload.decode("utf-8"))
+
                 
                 success = handle_migration(message)
                 client_socket.send(b"M" if success else b"R")
+
+
+            
+
             else:
                 print(f"[Python File Server] ❓ Unknown message type: {msg_type}")
-        except Exception as e:
-            print(f"[Python File Server] Error handling client: {e}")
+
+      
         finally:
             client_socket.close()
 
@@ -122,7 +93,7 @@ class FileServer:
         print(f"[Python] 🧪 Final derived key (HKDF): {derived_key.hex()}")
 
         # Store session key for this client
-        self.session_keys[client_address[0]] = derived_key
+        self.session_key = derived_key
 
         public_bytes = public_key.public_bytes(
             encoding=serialization.Encoding.PEM,
@@ -133,69 +104,102 @@ class FileServer:
         print("[Python] 📤 Sent PEM public key to Ruby peer")
 
     def handle_file_request(self, client_socket, client_address):
-        try:
-            data_len = int.from_bytes(client_socket.recv(4), 'big')
-            data = client_socket.recv(data_len)
-            request = json.loads(data.decode('utf-8'))
 
-            file_name = request.get("file_name")
-            print(f"[Python File Server] 📅 Incoming request for file '{file_name}'")
+        data_len = int.from_bytes(client_socket.recv(4), 'big')
+        data = client_socket.recv(data_len)
+        request = json.loads(data.decode('utf-8'))
 
-            file_path = os.path.join("Files", file_name)
-            if os.path.exists(file_path):
-                print(f"📥 File request from {client_address[0]} for '{file_name}'")
+        file_name = request.get("file_name")
+        print(f"[Python File Server] 📅 Incoming request for file '{file_name}'")
 
-                confirm = input(f"⚠️ Allow transfer of '{file_name}'? (y/n): ").strip().lower()
+        file_path = os.path.join("Files", file_name)
+        if os.path.exists(file_path):
+            print(f"📥 File request from {client_address[0]} for '{file_name}'")
 
+       
+            confirm = input(f"⚠️ Allow transfer of '{file_name}'? (y/n): ").strip().lower()
+     
+
+            if confirm != "y":
+                response = {"status": "rejected", "message": "User denied file transfer"}
+                client_socket.send(b"F")
+                client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
+                client_socket.send(json.dumps(response).encode('utf-8'))
+                print("❌ File transfer denied.")
+                return
+
+            # Check if file is encrypted and needs password
+            is_encrypted = file_name.endswith('.enc')
+            file_content = None
+            
+            if is_encrypted:
+                print("🔒 This file is encrypted. Enter the password to decrypt it.")
+                password = getpass("Enter password: ")
+                file_content = self.secure_storage.get_file_content(file_name, password)
+                
+                if file_content is None:
+                    response = {"status": "rejected", "message": "Failed to decrypt file"}
+                    client_socket.send(b"F")
+                    client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
+                    client_socket.send(json.dumps(response).encode('utf-8'))
+                    print("❌ Decryption failed. File transfer aborted.")
+                    return
+            else:
+                # Proceed to read file
+                with open(file_path, 'rb') as file:
+                    file_content = file.read()
+
+            response = {"status": "accepted"}
+            client_socket.send(b"F")
+            client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
+            client_socket.send(json.dumps(response).encode('utf-8'))
+
+            encrypted = encrypt_file(file_content, self.session_key)
+
+            client_socket.send(b"D")
+            client_socket.send(len(encrypted["iv"]).to_bytes(4, 'big'))
+            client_socket.send(encrypted["iv"])
+            client_socket.send(len(encrypted["tag"]).to_bytes(4, 'big'))
+            client_socket.send(encrypted["tag"])
+            client_socket.send(len(encrypted["ciphertext"]).to_bytes(4, 'big'))
+            client_socket.send(encrypted["ciphertext"])
+
+            print(f"[Python File Server] ✅ Encrypted file '{file_name}' sent.")
+        else:
+            # Check if there's an encrypted version of the file
+            encrypted_path = os.path.join("Files", file_name + ".enc")
+            if os.path.exists(encrypted_path):
+                print(f"📥 Encrypted file request from {client_address[0]} for '{file_name}'")
+                
+                confirm = input(f"⚠️ Allow transfer of encrypted '{file_name}'? (y/n): ").strip().lower()
+                
                 if confirm != "y":
                     response = {"status": "rejected", "message": "User denied file transfer"}
-                    print(f"Sending rejection response: {response}")
                     client_socket.send(b"F")
-                    response_bytes = json.dumps(response).encode('utf-8')
-                    client_socket.send(len(response_bytes).to_bytes(4, 'big'))
-                    client_socket.send(response_bytes)
+                    client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
+                    client_socket.send(json.dumps(response).encode('utf-8'))
                     print("❌ File transfer denied.")
                     return
-
-                # Check if file is encrypted and needs password
-                is_encrypted = file_name.endswith('.enc')
-                file_content = None
+                    
+                print("🔒 This file is encrypted. Enter the password to decrypt it.")
+                password = getpass("Enter password: ")
                 
-                if is_encrypted:
-                    print("🔒 This file is encrypted. Enter the password to decrypt it.")
-                    password = getpass("Enter password: ")
-                    file_content = self.secure_storage.get_file_content(file_name, password)
+                file_content = self.secure_storage.get_file_content(file_name + ".enc", password)
+                
+                if file_content is None:
+                    response = {"status": "rejected", "message": "Failed to decrypt file"}
+                    client_socket.send(b"F")
+                    client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
+                    client_socket.send(json.dumps(response).encode('utf-8'))
+                    print("❌ Decryption failed. File transfer aborted.")
+                    return
                     
-                    if file_content is None:
-                        response = {"status": "rejected", "message": "Failed to decrypt file"}
-                        client_socket.send(b"F")
-                        response_bytes = json.dumps(response).encode('utf-8')
-                        client_socket.send(len(response_bytes).to_bytes(4, 'big'))
-                        client_socket.send(response_bytes)
-                        print("❌ Decryption failed. File transfer aborted.")
-                        return
-                else:
-                    # Proceed to read file
-                    with open(file_path, 'rb') as file:
-                        file_content = file.read()
-
                 response = {"status": "accepted"}
-                print(f"Sending acceptance response: {response}")
                 client_socket.send(b"F")
-                response_bytes = json.dumps(response).encode('utf-8')
-                client_socket.send(len(response_bytes).to_bytes(4, 'big'))
-                client_socket.send(response_bytes)
+                client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
+                client_socket.send(json.dumps(response).encode('utf-8'))
 
-                # Get the session key for this client
-                session_key = self.session_keys.get(client_address[0])
-                if not session_key:
-                    print(f"⚠️ No session key found for {client_address[0]}, using fallback encryption")
-                    # Generate a temporary key if needed
-                    session_key = os.urandom(32)
-                    
-                print(f"Encrypting file ({len(file_content)} bytes) with session key")
-                encrypted = encrypt_file(file_content, session_key)
-                print(f"Encryption completed, sending data packet")
+                encrypted = encrypt_file(file_content, self.session_key)
 
                 client_socket.send(b"D")
                 client_socket.send(len(encrypted["iv"]).to_bytes(4, 'big'))
@@ -205,87 +209,13 @@ class FileServer:
                 client_socket.send(len(encrypted["ciphertext"]).to_bytes(4, 'big'))
                 client_socket.send(encrypted["ciphertext"])
 
-                print(f"[Python File Server] ✅ Encrypted file '{file_name}' sent.")
+                print(f"[Python File Server] ✅ Decrypted and sent file '{file_name}'.")
             else:
-                # Check if there's an encrypted version of the file
-                encrypted_path = os.path.join("Files", file_name + ".enc")
-                if os.path.exists(encrypted_path):
-                    print(f"📥 Encrypted file request from {client_address[0]} for '{file_name}'")
-                    
-                    confirm = input(f"⚠️ Allow transfer of encrypted '{file_name}'? (y/n): ").strip().lower()
-                    
-                    if confirm != "y":
-                        response = {"status": "rejected", "message": "User denied file transfer"}
-                        client_socket.send(b"F")
-                        response_bytes = json.dumps(response).encode('utf-8')
-                        client_socket.send(len(response_bytes).to_bytes(4, 'big'))
-                        client_socket.send(response_bytes)
-                        print("❌ File transfer denied.")
-                        return
-                        
-                    print("🔒 This file is encrypted. Enter the password to decrypt it.")
-                    password = getpass("Enter password: ")
-                    
-                    file_content = self.secure_storage.get_file_content(file_name + ".enc", password)
-                    
-                    if file_content is None:
-                        response = {"status": "rejected", "message": "Failed to decrypt file"}
-                        client_socket.send(b"F")
-                        response_bytes = json.dumps(response).encode('utf-8')
-                        client_socket.send(len(response_bytes).to_bytes(4, 'big'))
-                        client_socket.send(response_bytes)
-                        print("❌ Decryption failed. File transfer aborted.")
-                        return
-                        
-                    response = {"status": "accepted"}
-                    print(f"Sending acceptance response (encrypted file): {response}")
-                    client_socket.send(b"F")
-                    response_bytes = json.dumps(response).encode('utf-8')
-                    client_socket.send(len(response_bytes).to_bytes(4, 'big'))
-                    client_socket.send(response_bytes)
-
-                    # Get the session key for this client
-                    session_key = self.session_keys.get(client_address[0])
-                    if not session_key:
-                        print(f"⚠️ No session key found for {client_address[0]}, using fallback encryption")
-                        # Generate a temporary key if needed
-                        session_key = os.urandom(32)
-                    
-                    print(f"Encrypting file ({len(file_content)} bytes) with session key")
-                    encrypted = encrypt_file(file_content, session_key)
-                    print(f"Encryption completed, sending data packet")
-
-                    client_socket.send(b"D")
-                    client_socket.send(len(encrypted["iv"]).to_bytes(4, 'big'))
-                    client_socket.send(encrypted["iv"])
-                    client_socket.send(len(encrypted["tag"]).to_bytes(4, 'big'))
-                    client_socket.send(encrypted["tag"])
-                    client_socket.send(len(encrypted["ciphertext"]).to_bytes(4, 'big'))
-                    client_socket.send(encrypted["ciphertext"])
-
-                    print(f"[Python File Server] ✅ Encrypted file '{file_name}' sent.")
-                else:
-                    # File not found
-                    print(f"❌ File '{file_name}' not found in Files directory")
-                    response = {"status": "not_found", "message": f"File '{file_name}' not found"}
-                    client_socket.send(b"F")
-                    response_bytes = json.dumps(response).encode('utf-8')
-                    client_socket.send(len(response_bytes).to_bytes(4, 'big'))
-                    client_socket.send(response_bytes)
-        except Exception as e:
-            print(f"[Python File Server] Error handling file request: {e}")
-            import traceback
-            traceback.print_exc()
-            try:
-                # Try to send an error response to the client
-                error_response = {"status": "error", "message": str(e)}
+                response = {"status": "rejected", "message": "File not found"}
                 client_socket.send(b"F")
-                response_bytes = json.dumps(error_response).encode('utf-8')
-                client_socket.send(len(response_bytes).to_bytes(4, 'big'))
-                client_socket.send(response_bytes)
-            except:
-                # If we can't even send an error response, just give up
-                pass
+                client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
+                client_socket.send(json.dumps(response).encode('utf-8'))
+                print(f"❌ File '{file_name}' not found.")
 
     def handle_file_list_request(self, client_socket):
         try:
@@ -326,14 +256,6 @@ class FileServer:
         return sha256.finalize().hex()
 
 
-# If this script is run directly, start the file server
 if __name__ == "__main__":
-    try:
-        server = FileServer()
-        print("Starting Python file server...")
-        server.start()
-    except KeyboardInterrupt:
-        print("\nShutting down Python file server...")
-        server.stop()
-    except Exception as e:
-        print(f"Error starting server: {e}")
+    server = FileServer()
+    server.start()
