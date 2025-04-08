@@ -5,6 +5,7 @@ import subprocess
 import socket
 import json
 import hashlib
+import threading
 from getpass import getpass
 
 from advertise import advertise_service, stop_advertisement
@@ -160,10 +161,13 @@ def main(start_server=True):
     # Initialize known_peers.json file
     ensure_known_peers_file_exists()
     
-    # Only start the file server if it's not already running
+    # Start the file server in a thread instead of a subprocess if it's not already running
     if start_server and not is_port_in_use(5003):
         print("Starting file server...")
-        subprocess.Popen([sys.executable, "file_server.py"])
+        file_server = FileServer()
+        server_thread = threading.Thread(target=file_server.start, daemon=True)
+        server_thread.start()
+        print("✅ File server started in background")
     elif start_server:
         print("File server already running. Continuing with client mode only.")
 
