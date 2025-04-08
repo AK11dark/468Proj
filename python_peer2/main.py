@@ -7,6 +7,7 @@ import json
 import hashlib
 import threading
 from getpass import getpass
+import time
 
 from advertise import advertise_service, stop_advertisement
 from discover import discover_peers, set_own_service_name
@@ -151,6 +152,65 @@ def ensure_known_peers_file_exists():
         traceback.print_exc()
         return False
 
+def authenticate_with_peer(peer_ip, peer_port, peer_name):
+    """Authenticate with a peer and save the authentication information"""
+    print(f"🔐 Authenticating with {peer_name} ({peer_ip}:{peer_port})...")
+    
+    # Perform key exchange
+    session_key = perform_key_exchange_with_ruby(peer_ip, peer_port)
+    if not session_key:
+        print("❌ Key exchange failed.")
+        return False
+    
+    # Sign the session key
+    identity_payload = sign_session_key(session_key)
+    
+    # Send identity to peer
+    response = send_identity_to_ruby(peer_ip, peer_port, identity_payload)
+    
+    if response:
+        print(f"✅ Authentication successful with {peer_name}.")
+        
+        # Save this authentication
+        try:
+            auth_data = {}
+            auth_file_path = os.path.join(os.getcwd(), 'authenticated_peers.json')
+            
+            if os.path.exists(auth_file_path):
+                try:
+                    with open(auth_file_path, "r") as f:
+                        auth_data = json.load(f)
+                except json.JSONDecodeError:
+                    print("⚠️ Error reading authentication data file. Creating new one.")
+            
+            # Store with this exact peer name for compatibility
+            auth_data[peer_name] = {
+                "ip": peer_ip,
+                "port": peer_port,
+                "last_auth": int(time.time())
+            }
+            
+            # Also store a simplified version for easier matching
+            if '_peer._tcp.local' in peer_name:
+                base_name = peer_name.split('._peer._tcp.local')[0]
+                auth_data[base_name] = {
+                    "ip": peer_ip,
+                    "port": peer_port,
+                    "last_auth": int(time.time())
+                }
+            
+            with open(auth_file_path, "w") as f:
+                json.dump(auth_data, f, indent=2)
+                
+            print(f"📝 Authentication data saved.")
+            return True
+        except Exception as e:
+            print(f"❌ Error saving authentication data: {e}")
+            return True  # Still return True as auth was successful
+    else:
+        print(f"❌ Authentication failed with {peer_name}.")
+        return False
+
 def main(start_server=True):
     print("🔁 Starting P2P Python Client (Send & Receive Mode)")
     service_name = advertise_service()
@@ -181,6 +241,7 @@ def main(start_server=True):
         print("5. 📁 Manage Received Files")
         print("6. Rotate Identity Key")
         print("7. 🌐 Find File from Alternative Source")
+        print("8. 🔑 Authenticate with Peer")
         print("0. Exit")
 
         choice = input("Enter choice: ")
@@ -205,31 +266,73 @@ def main(start_server=True):
                 continue
 
             print("\nChoose a peer to request from:")
-            for i, peer in enumerate(peers):
-                print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
+            for i, peer in enumerate(peers, 1):
+                print(f"{i}. {peer['name']} @ {peer['ip']}:{peer['port']}")
             try:
                 idx = int(input("Peer number: ")) - 1
+                if idx < 0 or idx >= len(peers):
+                    print("❌ Invalid selection.")
+                    continue
+                    
                 peer = peers[idx]
                 filename = input("Enter filename to request: ").strip()
+                
+                # Check for existing authentication
+                authenticated = False
+                if os.path.exists("authenticated_peers.json"):
+                    try:
+                        with open("authenticated_peers.json", "r") as f:
+                            auth_data = json.load(f)
+                            
+                            # Handle various possible peer name formats
+                            peer_keys = [peer["name"]]
+                            
+                            # Add variations of the name for matching
+                            if '_peer._tcp.local' in peer["name"]:
+                                base_name = peer["name"].split('._peer._tcp.local')[0]
+                                peer_keys.append(base_name)
+                                peer_keys.append(f"{base_name}._peer._tcp.local")
+                            
+                            # Try each variation to find a match
+                            matched_key = None
+                            for key in peer_keys:
+                                if key in auth_data:
+                                    matched_key = key
+                                    break
+                                    
+                            if matched_key:
+                                auth_time = time.strftime('%Y-%m-%d %H:%M:%S', 
+                                                time.localtime(auth_data[matched_key]["last_auth"]))
+                                print(f"ℹ️ Using existing authentication with {peer['name']} from {auth_time}")
+                                authenticated = True
+                            else:
+                                print(f"⚠️ No prior authentication with {peer['name']}.")
+                                print("ℹ️ Consider using option 8 first to authenticate with this peer.")
+                    except (json.JSONDecodeError, FileNotFoundError) as e:
+                        print(f"⚠️ Error reading authentication data: {e}")
+                else:
+                    print("⚠️ No authentication data found.")
+                    print("ℹ️ Consider using option 8 first to authenticate with peers.")
 
-                # Perform ECDH key exchange
+                # Perform key exchange regardless of authentication
                 session_key = perform_key_exchange_with_ruby(peer["ip"], peer["port"])
                 if not session_key:
                     print("❌ Key exchange failed.")
                     continue
                 
-                identity_payload = sign_session_key(session_key)
-                response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
-                if response:
-                    # Request the file list first to store hashes for this peer
-                    request_file_list(peer["ip"], peer["port"], peer["name"])
-                    # Then request the file
-                    request_file(peer["ip"], peer["port"], filename, session_key, peer["name"])
-                else:
-                    print("error with identitfication")
+                # If not authenticated, we'll still need to send identity for this session
+                if not authenticated:
+                    identity_payload = sign_session_key(session_key)
+                    response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
+                    if not response:
+                        print("❌ Identity verification failed. Try using option 8 first.")
+                        continue
+                
+                # Request the file
+                request_file(peer["ip"], peer["port"], filename, session_key, peer["name"])
 
-            except (ValueError, IndexError):
-                print("Invalid selection.")
+            except (ValueError, IndexError) as e:
+                print(f"❌ Invalid selection: {e}")
 
         elif choice == "3":
             create_identity()
@@ -368,6 +471,28 @@ def main(start_server=True):
                 print(f"❌ Error: {e}")
                 import traceback
                 traceback.print_exc()
+        elif choice == "8":
+            # Authenticate with a peer
+            peers = discover_peers()
+            if not peers:
+                print("❌ No peers found.")
+                continue
+                
+            print("\nChoose a peer to authenticate with:")
+            for i, peer in enumerate(peers, 1):
+                print(f"{i}. {peer['name']} @ {peer['ip']}:{peer['port']}")
+                
+            try:
+                idx = int(input("Peer number: ")) - 1
+                if idx < 0 or idx >= len(peers):
+                    print("❌ Invalid selection.")
+                    continue
+                    
+                peer = peers[idx]
+                authenticate_with_peer(peer["ip"], peer["port"], peer["name"])
+                
+            except (ValueError, IndexError):
+                print("❌ Invalid selection.")
         elif choice == "0":
             stop_advertisement()
             break

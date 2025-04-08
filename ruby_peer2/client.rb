@@ -6,6 +6,45 @@ require 'digest'
 
 
 def request_file(ip, port, filename, session_key, original_peer_name=nil)
+  # Check if already authenticated with this peer
+  authenticated = false
+  peer_auth_data = nil
+  
+  if original_peer_name
+    auth_file_path = File.join(Dir.pwd, 'authenticated_peers.json')
+    if File.exist?(auth_file_path)
+      begin
+        auth_data = JSON.parse(File.read(auth_file_path))
+        # Handle various possible peer name formats
+        peer_keys = [original_peer_name]
+        
+        # Add variations of the name for matching
+        if original_peer_name.include?('_peer._tcp.local')
+          base_name = original_peer_name.split('._peer._tcp.local').first
+          peer_keys << base_name
+          peer_keys << "#{base_name}._peer._tcp.local"
+        end
+        
+        # Try to find any variation of the peer name in the authentication data
+        matched_key = peer_keys.find { |key| auth_data.key?(key) }
+        
+        if matched_key
+          peer_auth_data = auth_data[matched_key]
+          auth_time = Time.at(peer_auth_data["last_auth"]).to_s
+          puts "🔑 Previously authenticated with #{original_peer_name} at #{auth_time}"
+          authenticated = true
+        end
+      rescue JSON::ParserError => e
+        puts "⚠️ Error parsing authentication data: #{e.message}"
+      end
+    end
+  end
+  
+  unless authenticated
+    puts "⚠️ Not yet authenticated with this peer."
+    puts "ℹ️ Consider using option 10 from the main menu to authenticate first."
+  end
+  
   puts "🚀 Sending file request to #{ip}:#{port} for #{filename}"
   socket = TCPSocket.new(ip, port)
   request = { "file_name" => filename }

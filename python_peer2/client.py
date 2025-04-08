@@ -9,9 +9,48 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from storage import SecureStorage
 from getpass import getpass
 import hashlib
+import time
 
 
 def request_file(ip, port, filename, session_key, original_peer_name=None):
+    # Check if already authenticated with this peer
+    authenticated = False
+    
+    if original_peer_name and os.path.exists("authenticated_peers.json"):
+        try:
+            with open("authenticated_peers.json", "r") as f:
+                auth_data = json.load(f)
+                
+                # Handle various possible peer name formats
+                peer_keys = [original_peer_name]
+                
+                # Add variations of the name for matching
+                if '_peer._tcp.local' in original_peer_name:
+                    base_name = original_peer_name.split('._peer._tcp.local')[0]
+                    peer_keys.append(base_name)
+                    peer_keys.append(f"{base_name}._peer._tcp.local")
+                
+                # Try each variation to find a match
+                matched_key = None
+                for key in peer_keys:
+                    if key in auth_data:
+                        matched_key = key
+                        break
+                        
+                if matched_key:
+                    peer_data = auth_data[matched_key]
+                    auth_time = time.strftime('%Y-%m-%d %H:%M:%S', 
+                                             time.localtime(peer_data["last_auth"]))
+                    print(f"🔑 Previously authenticated with {original_peer_name} at {auth_time}")
+                    authenticated = True
+                    
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            print(f"⚠️ Error reading authentication data: {e}")
+    
+    if not authenticated:
+        print("⚠️ Not yet authenticated with this peer.")
+        print("ℹ️ Consider using option 8 from the main menu to authenticate first.")
+    
     os.makedirs("Received", exist_ok=True)
 
     with socket.create_connection((ip, port)) as sock:
@@ -21,6 +60,7 @@ def request_file(ip, port, filename, session_key, original_peer_name=None):
         sock.send(b"F")
         sock.send(len(request_bytes).to_bytes(4, 'big'))
         sock.send(request_bytes)
+        print(f"📤 Sent request for file '{filename}' to {ip}:{port}")
 
         # Expect response type "F"
         resp_type = sock.recv(1)
