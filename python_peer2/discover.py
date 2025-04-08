@@ -2,36 +2,29 @@ import socket
 import time
 from zeroconf import Zeroconf, ServiceBrowser, ServiceListener
 
+# Store our own service name globally
+OWN_SERVICE_NAME = None
+
+def set_own_service_name(service_name):
+    """Set the service name of this client to filter out self-discovery"""
+    global OWN_SERVICE_NAME
+    OWN_SERVICE_NAME = service_name
+    print(f"Setting own service name: {OWN_SERVICE_NAME}")
 
 class PeerListener(ServiceListener):
     def __init__(self):
         self.peers = []
-        # Get the local IP to filter out self in discovery
-        self.local_ip = self._get_local_ip()
-        print(f"Local IP: {self.local_ip}")
-
-    def _get_local_ip(self):
-        """Get the local IP address for filtering out self in discovery"""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            # Fallback to loopback address if unable to determine
-            return "127.0.0.1"
 
     def add_service(self, zeroconf, service_type, name):
+        # Skip if this is our own service
+        global OWN_SERVICE_NAME
+        if OWN_SERVICE_NAME and name == OWN_SERVICE_NAME:
+            print(f"Skipping own service: {name}")
+            return
+            
         info = zeroconf.get_service_info(service_type, name)
         if info and info.addresses:
             ip = socket.inet_ntoa(info.addresses[0])
-            
-            # Skip if this is the local machine (ourselves)
-            if ip == self.local_ip:
-                print(f"Skipping local service: {name} @ {ip}")
-                return
-                
             props = {k.decode(): v.decode() for k, v in info.properties.items()}
             network_port = int(props.get("network_port", info.port))
 

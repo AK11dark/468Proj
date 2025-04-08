@@ -8,7 +8,7 @@ import hashlib
 from getpass import getpass
 
 from advertise import advertise_service, stop_advertisement
-from discover import discover_peers
+from discover import discover_peers, set_own_service_name
 from client import (
     request_file, 
     perform_key_exchange_with_ruby, 
@@ -153,6 +153,9 @@ def ensure_known_peers_file_exists():
 def main(start_server=True):
     print("🔁 Starting P2P Python Client")
     service_name = advertise_service()
+    
+    # Store our own service name to prevent self-discovery
+    set_own_service_name(service_name)
     
     # Initialize known_peers.json file
     ensure_known_peers_file_exists()

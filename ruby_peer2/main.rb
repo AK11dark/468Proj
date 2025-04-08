@@ -254,6 +254,9 @@ end
 # Keep a reference to the announcer so it doesn't get GC'd
 announcer = DNSSD::PeerAnnouncer.new
 
+# Store our own service name to prevent self-discovery
+PeerFinder.set_own_service_name(announcer.service_name)
+
 # Start advertising in a thread
 Thread.new do
   announcer.start

@@ -5,28 +5,18 @@ module PeerFinder
   MDNS_PORT = 5353
   MDNS_ADDR = "224.0.0.251"
   SERVICE_TYPE = "_peer._tcp.local."
-
-  def self.get_local_ip
-    # Get the local IP to filter out self in discovery
-    begin
-      sock = Socket.new(Socket::AF_INET, Socket::SOCK_DGRAM)
-      sock.connect("8.8.8.8", 80)
-      ip = sock.local_address.ip_address
-      sock.close
-      return ip
-    rescue
-      # Fallback to loopback if unable to determine
-      return "127.0.0.1"
-    end
+  
+  # Store our own service name to avoid self-discovery
+  @@own_service_name = nil
+  
+  def self.set_own_service_name(service_name)
+    @@own_service_name = service_name
+    puts "Setting own service name: #{@@own_service_name}"
   end
 
   def self.discover_peers(timeout = 10)
     socket = UDPSocket.new
     discovered_peers = {}
-    
-    # Get the local IP to filter out self
-    local_ip = get_local_ip
-    puts "Local IP: #{local_ip}"
 
     begin
       # Send PTR query
@@ -49,15 +39,15 @@ module PeerFinder
 
         service_names.each do |name|
           next if discovered_peers[name]
+          
+          # Skip if this is our own service
+          if @@own_service_name && name == @@own_service_name
+            puts "Skipping own service: #{name}"
+            next
+          end
 
           ip = response.additional.find { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::A) }&.last&.address&.to_s
           port = response.additional.find { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::SRV) }&.last&.port
-
-          # Skip if this is the local machine (ourselves)
-          if ip && ip == local_ip
-            puts "Skipping local service: #{name} @ #{ip}"
-            next
-          end
 
           if ip && port
             discovered_peers[name] = { name: name, ip: ip, port: port }
