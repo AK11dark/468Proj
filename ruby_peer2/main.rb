@@ -323,9 +323,6 @@ loop do
         # 🧠 Perform identity authentication
         if identity.send_authentication(selected_peer[:ip], selected_peer[:port], session_key)
           puts "Authentication successful."
-          # Get file list first to store hashes
-          request_file_list(selected_peer[:ip], selected_peer[:port], selected_peer[:name])
-          # ✅ Proceed with file request only if authenticated
           request_file(selected_peer[:ip], selected_peer[:port], filename, session_key, selected_peer[:name])
         else
           puts "❌ Identity verification failed before file request "

@@ -142,48 +142,12 @@ def perform_key_exchange_with_ruby(peer_ip, peer_port):
     sock.close()
     return derived_key
 
-def request_file_list(ip, port, peer_name=None):
-    try:
-        with socket.create_connection((ip, port), timeout=5) as sock:
-            sock.send(b"L")  # Request file list
-
-            resp_type = sock.recv(1)
-            if resp_type != b"L":
-                print("❌ Unexpected response type:", resp_type)
-                return
-
-            length = int.from_bytes(sock.recv(4), 'big')
-            data = sock.recv(length).decode()
-            file_list = json.loads(data)
-
-            print("📃 Files available on peer:")
-            for file_info in file_list:
-                if isinstance(file_info, dict):
-                    print(f" - {file_info['name']} (Hash: {file_info['hash']})")
-                else:
-                    # Handle legacy format without hashes
-                    print(f" - {file_info}")
-            
-            # If peer_name is provided, store the file list with hashes in known_peers.json
-            if peer_name:
-                save_peer_file_list(peer_name, file_list)
-                print(f"💾 Saved file list for peer '{peer_name}'")
-            
-            return file_list
-
-    except Exception as e:
-        print("❌ Failed to get file list:", e)
-        
-def save_peer_file_list(peer_name, file_list):
+def save_peer_file_list(peer_name, file_list, silent=False):
     """Save a peer's file list with hashes to known_peers.json"""
     try:
-        # Print current working directory for debugging
-        current_dir = os.getcwd()
-        print(f"Working directory: {current_dir}")
-        
         # File path for known_peers.json
+        current_dir = os.getcwd()
         file_path = os.path.join(current_dir, 'known_peers.json')
-        print(f"Will save to: {file_path}")
         
         # Load existing known_peers.json
         peers_data = {}
@@ -191,18 +155,13 @@ def save_peer_file_list(peer_name, file_list):
             try:
                 with open(file_path, 'r') as f:
                     peers_data = json.load(f)
-                print(f"Loaded existing peers data with {len(peers_data)} entries")
             except json.JSONDecodeError:
-                print(f"⚠️ Error parsing existing known_peers.json, will create new file")
-        else:
-            print(f"File doesn't exist yet, will create new one")
+                if not silent:
+                    print(f"⚠️ Error parsing existing known_peers.json, will create new file")
         
         # Add or update file_list for this peer
         if peer_name not in peers_data:
             peers_data[peer_name] = {}
-            print(f"Adding new peer: {peer_name}")
-        else:
-            print(f"Updating existing peer: {peer_name}")
         
         # Keep the public key if it exists
         if isinstance(peers_data[peer_name], str):
@@ -219,16 +178,54 @@ def save_peer_file_list(peer_name, file_list):
         try:
             with open(file_path, 'w') as f:
                 json.dump(peers_data, f, indent=2)
-            print(f"✅ Successfully saved peer file list to {file_path}")
+            if not silent:
+                print(f"💾 Saved file list for peer '{peer_name}'")
+            return True
         except PermissionError:
-            print(f"❌ Permission denied when writing to {file_path}")
+            if not silent:
+                print(f"❌ Permission denied when saving peer file list")
+            return False
         except IOError as e:
-            print(f"❌ IO error when writing to {file_path}: {e}")
+            if not silent:
+                print(f"❌ Error saving peer file list: {e}")
+            return False
             
     except Exception as e:
-        print(f"❌ Error saving peer file list: {e}")
-        import traceback
-        traceback.print_exc()
+        if not silent:
+            print(f"❌ Error saving peer file list: {e}")
+        return False
+
+def request_file_list(ip, port, peer_name=None):
+    try:
+        with socket.create_connection((ip, port), timeout=5) as sock:
+            sock.send(b"L")  # Request file list
+
+            resp_type = sock.recv(1)
+            if resp_type != b"L":
+                print("❌ Unexpected response type:", resp_type)
+                return
+
+            length = int.from_bytes(sock.recv(4), 'big')
+            data = sock.recv(length).decode()
+            file_list = json.loads(data)
+
+            print("\n📃 Files available on peer:")
+            for i, file_info in enumerate(file_list, 1):
+                if isinstance(file_info, dict):
+                    print(f"{i}. {file_info['name']} (Hash: {file_info['hash']})")
+                else:
+                    # Handle legacy format without hashes
+                    print(f"{i}. {file_info}")
+            
+            # If peer_name is provided, store the file list with hashes in known_peers.json
+            if peer_name:
+                save_peer_file_list(peer_name, file_list)
+            
+            return file_list
+
+    except Exception as e:
+        print("❌ Failed to get file list:", e)
+        return None
 
 def verify_file_hash(filename, file_content, peer_name):
     """Verify that a file's hash matches what was advertised by the original peer"""
