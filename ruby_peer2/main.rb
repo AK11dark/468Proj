@@ -3,7 +3,7 @@ require_relative "advertise"     # for advertising
 require_relative "file_server"   # file server logic
 require_relative "client"        # Add client for file request
 require_relative "identity"
-require_relative "storage"       # Add storage for secure file handling
+require_relative "storage"       # Add storage for secure file handling"
 require 'io/console'             # For password input without echoing
 require 'json'
 
@@ -266,6 +266,11 @@ puts "\n🔁 mDNS advertising started."
 puts "📡 mDNS discovery ready."
 
 loop do
+  # Check for pending file transfer requests
+  if file_server.has_pending_requests?
+    puts "\n📥 There are pending file transfer requests. Enter 'y' to accept or 'n' to reject."
+  end
+
   puts "\nMenu:"
   puts "1. Discover peers"
   puts "2. Request File"
@@ -283,6 +288,7 @@ loop do
 
   case choice
   when "y"
+    puts "Accepting file transfer..."
     if file_server.process_pending_request(true)
       puts "✅ File transfer accepted and processed."
     else

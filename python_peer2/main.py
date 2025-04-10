@@ -150,7 +150,189 @@ def ensure_known_peers_file_exists():
         traceback.print_exc()
         return False
 
-def main(start_server=True):
+def handle_find_peers():
+    peers = discover_peers()
+    if not peers:
+        print("❌ No peers found.")
+    else:
+        print("\n✅ Discovered Peers:")
+        for i, peer in enumerate(peers, 1):
+            print(f"{i}. {peer['name']} @ {peer['ip']}:{peer['port']}")
+
+def handle_request_file():
+    # Check if identity exists first
+    if not ensure_identity_exists():
+        return
+        
+    peers = discover_peers()
+    if not peers:
+        print("No peers found.")
+        return
+
+    print("\nChoose a peer to request from:")
+    for i, peer in enumerate(peers):
+        print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
+    try:
+        idx = int(input("Peer number: ")) - 1
+        peer = peers[idx]
+        filename = input("Enter filename to request: ").strip()
+
+        # Perform ECDH key exchange
+        session_key = perform_key_exchange_with_ruby(peer["ip"], peer["port"])
+        if not session_key:
+            print("❌ Key exchange failed.")
+            return
+        
+        identity_payload = sign_session_key(session_key)
+        response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
+        if response:
+            # Request the file list first to store hashes for this peer
+            request_file_list(peer["ip"], peer["port"], peer["name"])
+            # Then request the file
+            request_file(peer["ip"], peer["port"], filename, session_key, peer["name"])
+        else:
+            print("error with identitfication")
+
+    except (ValueError, IndexError):
+        print("Invalid selection.")
+
+def handle_request_file_list():
+    peers = discover_peers()
+    if not peers:
+        print("❌ No peers found.")
+        return
+
+    print("\nChoose a peer to get file list from:")
+    for i, peer in enumerate(peers):
+        print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
+    try:
+        idx = int(input("Peer number: ")) - 1
+        peer = peers[idx]
+        request_file_list(peer["ip"], peer["port"], peer["name"])
+    except (ValueError, IndexError):
+        print("❌ Invalid selection.")
+
+def handle_rotate_key():
+    migrate_msg = rotate_public_key()
+    if migrate_msg:
+        notify_peers_of_rotation(migrate_msg)
+
+def handle_find_alternative_source():
+    # Finding files from alternative sources with hash verification
+    if not os.path.exists("known_peers.json"):
+        print("❌ No known peers data. Please use option 4 to fetch file lists first.")
+        return
+        
+    try:
+        # Load known peers to find files
+        with open("known_peers.json", "r") as f:
+            peers_data = json.load(f)
+        
+        # Create a mapping of peers having each file
+        available_files = {}
+        for peer_name, peer_info in peers_data.items():
+            if isinstance(peer_info, dict) and "files" in peer_info:
+                for file_info in peer_info["files"]:
+                    if isinstance(file_info, dict):
+                        filename = file_info["name"]
+                        if filename not in available_files:
+                            available_files[filename] = []
+                        available_files[filename].append({
+                            "peer": peer_name,
+                            "hash": file_info["hash"]
+                        })
+        
+        if not available_files:
+            print("❌ No files found in known peers.")
+            return
+        
+        # Show available files
+        print("\n📃 Files available from all known peers:")
+        file_list = list(available_files.keys())
+        for i, filename in enumerate(file_list):
+            peers_with_file = [info["peer"] for info in available_files[filename]]
+            print(f"{i+1}. {filename} (Available from: {', '.join(peers_with_file)})")
+        
+        # Ask which file to download
+        file_idx = int(input("\nWhich file do you want to download? (number): ")) - 1
+        if file_idx < 0 or file_idx >= len(file_list):
+            print("❌ Invalid selection.")
+            return
+        
+        filename = file_list[file_idx]
+        
+        # Show available sources for this file
+        print(f"\n🌐 Available sources for '{filename}':")
+        sources = available_files[filename]
+        for i, source in enumerate(sources):
+            print(f"{i+1}. {source['peer']} (Hash: {source['hash']})")
+        
+        # Ask which source to use
+        source_idx = int(input("\nWhich source do you want to use? (number): ")) - 1
+        if source_idx < 0 or source_idx >= len(sources):
+            print("❌ Invalid selection.")
+            return
+        
+        selected_source = sources[source_idx]
+        original_peer = selected_source["peer"]
+        
+        # Now find an active peer to download from
+        active_peers = discover_peers()
+        active_peer_names = [p["name"] for p in active_peers]
+        
+        if original_peer in active_peer_names:
+            # Original peer is online, download directly
+            print(f"✅ Original peer '{original_peer}' is online. Downloading directly.")
+            peer = next(p for p in active_peers if p["name"] == original_peer)
+            
+            # Perform key exchange with the peer
+            session_key = perform_key_exchange_with_ruby(peer["ip"], peer["port"])
+            if not session_key:
+                print("❌ Key exchange failed.")
+                return
+            
+            identity_payload = sign_session_key(session_key)
+            response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
+            if response:
+                request_file(peer["ip"], peer["port"], filename, session_key, original_peer)
+            else:
+                print("❌ Error with identification")
+        else:
+            # Original peer is offline, try to find alternative source
+            print(f"⚠️ Original peer '{original_peer}' is offline. Looking for alternative sources...")
+            
+            # Ask which active peer to try
+            print("\n🔍 Active peers that might have the file:")
+            for i, peer in enumerate(active_peers):
+                print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
+            
+            peer_idx = int(input("\nWhich peer to try? (number): ")) - 1
+            if peer_idx < 0 or peer_idx >= len(active_peers):
+                print("❌ Invalid selection.")
+                return
+            
+            alternative_peer = active_peers[peer_idx]
+            
+            # Perform key exchange with the alternative peer
+            session_key = perform_key_exchange_with_ruby(alternative_peer["ip"], alternative_peer["port"])
+            if not session_key:
+                print("❌ Key exchange failed.")
+                return
+            
+            identity_payload = sign_session_key(session_key)
+            response = send_identity_to_ruby(alternative_peer["ip"], alternative_peer["port"], identity_payload)
+            if response:
+                print(f"⚠️ Downloading from alternative peer '{alternative_peer['name']}' with verification against original peer '{original_peer}'")
+                request_file(alternative_peer["ip"], alternative_peer["port"], filename, session_key, original_peer)
+            else:
+                print("❌ Error with identification")
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+
+def main():
     print("🔁 Starting P2P Python Client")
     service_name = advertise_service()
     
@@ -160,11 +342,11 @@ def main(start_server=True):
     # Initialize known_peers.json file
     ensure_known_peers_file_exists()
     
-    # Only start the file server if it's not already running
-    if start_server and not is_port_in_use(5003):
+    # Start the file server if it's not already running
+    if not is_port_in_use(5003):
         print("Starting file server...")
         subprocess.Popen([sys.executable, "file_server.py"])
-    elif start_server:
+    else:
         print("File server already running. Continuing with client mode only.")
 
     while True:
@@ -181,220 +363,25 @@ def main(start_server=True):
         choice = input("Enter choice: ")
 
         if choice == "1":
-            peers = discover_peers()
-            if not peers:
-                print("❌ No peers found.")
-            else:
-                print("\n✅ Discovered Peers:")
-                for i, peer in enumerate(peers, 1):
-                    print(f"{i}. {peer['name']} @ {peer['ip']}:{peer['port']}")
-
+            handle_find_peers()
         elif choice == "2":
-            # Check if identity exists first
-            if not ensure_identity_exists():
-                continue
-                
-            peers = discover_peers()
-            if not peers:
-                print("No peers found.")
-                continue
-
-            print("\nChoose a peer to request from:")
-            for i, peer in enumerate(peers):
-                print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
-            try:
-                idx = int(input("Peer number: ")) - 1
-                peer = peers[idx]
-                filename = input("Enter filename to request: ").strip()
-
-                # Perform ECDH key exchange
-                session_key = perform_key_exchange_with_ruby(peer["ip"], peer["port"])
-                if not session_key:
-                    print("❌ Key exchange failed.")
-                    continue
-                
-                identity_payload = sign_session_key(session_key)
-                response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
-                if response:
-                    # Request the file list first to store hashes for this peer
-                    request_file_list(peer["ip"], peer["port"], peer["name"])
-                    # Then request the file
-                    request_file(peer["ip"], peer["port"], filename, session_key, peer["name"])
-                else:
-                    print("error with identitfication")
-
-            except (ValueError, IndexError):
-                print("Invalid selection.")
-
+            handle_request_file()
         elif choice == "3":
             create_identity()
         elif choice == "4":
-            peers = discover_peers()
-            if not peers:
-                print("❌ No peers found.")
-                continue
-
-            print("\nChoose a peer to get file list from:")
-            for i, peer in enumerate(peers):
-                print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
-            try:
-                idx = int(input("Peer number: ")) - 1
-                peer = peers[idx]
-                request_file_list(peer["ip"], peer["port"], peer["name"])
-            except (ValueError, IndexError):
-                print("❌ Invalid selection.")
+            handle_request_file_list()
         elif choice == "5":
             manage_files()
-        elif choice =="6":
-            migrate_msg = rotate_public_key()
-            if migrate_msg:
-                notify_peers_of_rotation(migrate_msg)
+        elif choice == "6":
+            handle_rotate_key()
         elif choice == "7":
-            # Finding files from alternative sources with hash verification
-            if not os.path.exists("known_peers.json"):
-                print("❌ No known peers data. Please use option 4 to fetch file lists first.")
-                continue
-                
-            try:
-                # Load known peers to find files
-                with open("known_peers.json", "r") as f:
-                    peers_data = json.load(f)
-                
-                # Create a mapping of peers having each file
-                available_files = {}
-                for peer_name, peer_info in peers_data.items():
-                    if isinstance(peer_info, dict) and "files" in peer_info:
-                        for file_info in peer_info["files"]:
-                            if isinstance(file_info, dict):
-                                filename = file_info["name"]
-                                if filename not in available_files:
-                                    available_files[filename] = []
-                                available_files[filename].append({
-                                    "peer": peer_name,
-                                    "hash": file_info["hash"]
-                                })
-                
-                if not available_files:
-                    print("❌ No files found in known peers.")
-                    continue
-                
-                # Show available files
-                print("\n📃 Files available from all known peers:")
-                file_list = list(available_files.keys())
-                for i, filename in enumerate(file_list):
-                    peers_with_file = [info["peer"] for info in available_files[filename]]
-                    print(f"{i+1}. {filename} (Available from: {', '.join(peers_with_file)})")
-                
-                # Ask which file to download
-                file_idx = int(input("\nWhich file do you want to download? (number): ")) - 1
-                if file_idx < 0 or file_idx >= len(file_list):
-                    print("❌ Invalid selection.")
-                    continue
-                
-                filename = file_list[file_idx]
-                
-                # Show available sources for this file
-                print(f"\n🌐 Available sources for '{filename}':")
-                sources = available_files[filename]
-                for i, source in enumerate(sources):
-                    print(f"{i+1}. {source['peer']} (Hash: {source['hash']})")
-                
-                # Ask which source to use
-                source_idx = int(input("\nWhich source do you want to use? (number): ")) - 1
-                if source_idx < 0 or source_idx >= len(sources):
-                    print("❌ Invalid selection.")
-                    continue
-                
-                selected_source = sources[source_idx]
-                original_peer = selected_source["peer"]
-                
-                # Now find an active peer to download from
-                active_peers = discover_peers()
-                active_peer_names = [p["name"] for p in active_peers]
-                
-                if original_peer in active_peer_names:
-                    # Original peer is online, download directly
-                    print(f"✅ Original peer '{original_peer}' is online. Downloading directly.")
-                    peer = next(p for p in active_peers if p["name"] == original_peer)
-                    
-                    # Perform key exchange with the peer
-                    session_key = perform_key_exchange_with_ruby(peer["ip"], peer["port"])
-                    if not session_key:
-                        print("❌ Key exchange failed.")
-                        continue
-                    
-                    identity_payload = sign_session_key(session_key)
-                    response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
-                    if response:
-                        request_file(peer["ip"], peer["port"], filename, session_key, original_peer)
-                    else:
-                        print("❌ Error with identification")
-                else:
-                    # Original peer is offline, try to find alternative source
-                    print(f"⚠️ Original peer '{original_peer}' is offline. Looking for alternative sources...")
-                    
-                    # Ask which active peer to try
-                    print("\n🔍 Active peers that might have the file:")
-                    for i, peer in enumerate(active_peers):
-                        print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
-                    
-                    peer_idx = int(input("\nWhich peer to try? (number): ")) - 1
-                    if peer_idx < 0 or peer_idx >= len(active_peers):
-                        print("❌ Invalid selection.")
-                        continue
-                    
-                    alternative_peer = active_peers[peer_idx]
-                    
-                    # Perform key exchange with the alternative peer
-                    session_key = perform_key_exchange_with_ruby(alternative_peer["ip"], alternative_peer["port"])
-                    if not session_key:
-                        print("❌ Key exchange failed.")
-                        continue
-                    
-                    identity_payload = sign_session_key(session_key)
-                    response = send_identity_to_ruby(alternative_peer["ip"], alternative_peer["port"], identity_payload)
-                    if response:
-                        print(f"⚠️ Downloading from alternative peer '{alternative_peer['name']}' with verification against original peer '{original_peer}'")
-                        request_file(alternative_peer["ip"], alternative_peer["port"], filename, session_key, original_peer)
-                    else:
-                        print("❌ Error with identification")
-                
-            except Exception as e:
-                print(f"❌ Error: {e}")
-                import traceback
-                traceback.print_exc()
+            handle_find_alternative_source()
         elif choice == "0":
             stop_advertisement()
             break
-
         else:
             print("Invalid choice.")
 
-def start():
-    print("Welcome to P2P File Share")
-    print("1. Receive a file")
-    print("2. Send a file (standby to recieve file request)")
-    choice = input("Select your role (1 or 2): ").strip()
-
-    if choice == "1":
-        print("📤 Starting in reciever mode...")
-        main(start_server=True)
-        
-    elif choice == "2":
-        print("📥 Starting in send mode...")
-        service_name = advertise_service()
-        server = FileServer()
-        print("👋 Press Ctrl+C to stop the server at any time.")
-
-        try:
-            server.start()  # runs in the foreground so input() works
-        except KeyboardInterrupt:
-            print("\n🛑 Shutting down...")
-            stop_advertisement()
-            sys.exit(0)
-    else:
-        print("❌ Invalid selection.")
-        sys.exit(1)
 
 if __name__ == "__main__":
-    start()
+    main()
