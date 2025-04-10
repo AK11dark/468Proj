@@ -173,8 +173,20 @@ def handle_file_request(socket)
     return
   end
 
-  file_data = File.binread(file_path)
+  puts "accept file transfer? y/n"
+  response = socket.gets.chomp
+  if response == "y"
+    puts "✅ File transfer accepted"
+  else
+    puts "❌ File transfer rejected"
+    response = { status: "error", message: "File transfer rejected" }
+    socket.write("F")
+    socket.write([response.to_json.bytesize].pack("N"))
+    socket.write(response.to_json)
+    return
+  end
 
+  file_data = File.binread(file_path)
   # ✅ Encrypt the file with AES-GCM and the session key
   cipher = OpenSSL::Cipher.new("aes-256-gcm")
   cipher.encrypt
