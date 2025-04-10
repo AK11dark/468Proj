@@ -34,9 +34,7 @@ class FileServer
       puts "command recieve, peer is migrating key"
       handle_key_migration(socket)
     when "F"
-      $run = false
-      handle_file_request(socket)
-      $run = true
+      puts "accept file transfer? y/n"
     when "L"
       handle_file_list_request(socket)
     when "K"
@@ -156,7 +154,7 @@ class FileServer
     File.write("known_peers.json", JSON.pretty_generate(peers))
   end
 
-  def handle_file_request(socket)
+  def handle_file_request(socket, consent)
     len = socket.read(4).unpack1("N")
     payload = socket.read(len)
     request = JSON.parse(payload)
@@ -175,27 +173,13 @@ class FileServer
       return
     end
 
-    # Pause the menu loop
-    $menu_mutex.synchronize do
-      $menu_paused = true
-    end
-
-    puts "accept file transfer? y/n"
-    response = STDIN.gets.chomp
-    if response == "y"
-      puts "✅ File transfer accepted"
+    if consent == true
+      next
     else
-      puts "❌ File transfer rejected"
       response = { status: "error", message: "File transfer rejected" }
       socket.write("F")
       socket.write([response.to_json.bytesize].pack("N"))
       socket.write(response.to_json)
-      
-      # Resume the menu loop
-      $menu_mutex.synchronize do
-        $menu_paused = false
-        $menu_condition.signal
-      end
       return
     end
 
@@ -232,12 +216,6 @@ class FileServer
     puts "🔑 IV: #{iv.unpack1('H*')}"
     puts "📎 Tag: #{tag.unpack1('H*')}"
     puts "🧱 Ciphertext size: #{ciphertext.bytesize} bytes"
-
-    # Resume the menu loop
-    $menu_mutex.synchronize do
-      $menu_paused = false
-      $menu_condition.signal
-    end
   end
 
   def handle_file_list_request(socket)

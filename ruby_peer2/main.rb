@@ -6,13 +6,7 @@ require_relative "identity"
 require_relative "storage"       # Add storage for secure file handling
 require 'io/console'             # For password input without echoing
 require 'json'
-require 'thread'                 # For mutex support
 
-# Create a mutex for thread synchronization
-$menu_mutex = Mutex.new
-$menu_condition = ConditionVariable.new
-$menu_paused = false
-$should_exit = false
 # Helper method for password input
 def get_password(prompt="Enter password: ")
   print prompt
@@ -247,33 +241,53 @@ def ensure_known_peers_file_exists
   end
 end
 
-#global variable to control the loop for any consent required prompts.
-$run = true
-def menu_loop()
-  loop do
-    $menu_mutex.synchronize do
-      while $menu_paused
-        $menu_condition.wait($menu_mutex)
-      end
-      break if $should_exit
-    end
+# Ensure known_peers.json file exists at startup
+ensure_known_peers_file_exists
 
-    puts "\nMenu:"
-    puts "1. Discover peers"
-    puts "2. Request File"
-    puts "3. View File List"
-    puts "4. Create an identity to share with peer"
-    puts "5. Rotate Identity"
-    puts "6. 🔓 Decrypt Stored File"
-    puts "7. 🔒 Encrypt a File"
-    puts "8. 📂 List Stored Files"
-    puts "9. 🌐 Find File from Alternative Source"
-    puts "0. Exit"
-    print "> "
+# Start OOP FileServer in a thread
+file_server = FileServer.new
+Thread.new do
+  file_server.start
+end
+
+
+# Keep a reference to the announcer so it doesn't get GC'd
+announcer = DNSSD::PeerAnnouncer.new
+
+# Store our own service name to prevent self-discovery
+PeerFinder.set_own_service_name(announcer.service_name)
+
+# Start advertising in a thread
+Thread.new do
+  announcer.start
+end
+
+puts "\n🔁 mDNS advertising started."
+puts "📡 mDNS discovery ready."
+
+loop do
+  puts "\nMenu:"
+  puts "1. Discover peers"
+  puts "2. Request File"
+  puts "3. View File List"
+  puts "4. Create an identity to share with peer"
+  puts "5. Rotate Identity"
+  puts "6. 🔓 Decrypt Stored File"
+  puts "7. 🔒 Encrypt a File"
+  puts "8. 📂 List Stored Files"
+  puts "9. 🌐 Find File from Alternative Source"
+  puts "0. Exit"
+  print "> "
 
   choice = gets.chomp
 
   case choice
+  when "y"
+    puts "accept file transfer"
+    file_server.handle_file_request(socket, consent=true)
+  when "n"
+    puts "reject file transfer"
+    file_server.handle_file_request(socket, consent=false)
   when "1"
     peers = PeerFinder.discover_peers(5)
     if peers.empty?
@@ -348,7 +362,7 @@ def menu_loop()
   when "4"
     identity = PeerIdentity.new
     identity.create_identity
-    
+  # Add this option to the menu loop
   when "5"
     identity = PeerIdentity.new
     migrate_msg = identity.rotate_key
@@ -542,39 +556,9 @@ def menu_loop()
       puts e.backtrace.join("\n")
     end
   when "0"
-    $menu_mutex.synchronize do
-      $should_exit = true
-    end
-    break
+    puts "\n👋 Exiting."
+    exit
   else
     puts "Invalid option."
-    end
   end
 end
-
-
-# Ensure known_peers.json file exists at startup
-ensure_known_peers_file_exists
-
-# Start OOP FileServer in a thread
-file_server = FileServer.new
-Thread.new do
-  file_server.start
-end
-
-
-# Keep a reference to the announcer so it doesn't get GC'd
-announcer = DNSSD::PeerAnnouncer.new
-
-# Store our own service name to prevent self-discovery
-PeerFinder.set_own_service_name(announcer.service_name)
-
-# Start advertising in a thread
-Thread.new do
-  announcer.start
-end
-
-puts "\n🔁 mDNS advertising started."
-puts "📡 mDNS discovery ready."
-
-menu_loop
