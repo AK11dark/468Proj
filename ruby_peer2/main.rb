@@ -282,6 +282,19 @@ loop do
   choice = gets.chomp
 
   case choice
+  when "y"
+    if file_server.process_pending_request(true)
+      puts "✅ File transfer accepted and processed."
+    else
+      puts "❓ No pending file transfer requests."
+    end
+  when "n"
+    puts "Rejecting file transfer..."
+    if file_server.process_pending_request(false)
+      puts "❌ File transfer rejected."
+    else
+      puts "❓ No pending file transfer requests."
+    end
   when "1"
     peers = PeerFinder.discover_peers(5)
     if peers.empty?
