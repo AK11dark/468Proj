@@ -173,9 +173,7 @@ class FileServer
       return
     end
 
-    if consent == true
-      next
-    else
+    if consent == false
       response = { status: "error", message: "File transfer rejected" }
       socket.write("F")
       socket.write([response.to_json.bytesize].pack("N"))

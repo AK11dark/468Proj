@@ -3,7 +3,7 @@ require_relative "advertise"     # for advertising
 require_relative "file_server"   # file server logic
 require_relative "client"        # Add client for file request
 require_relative "identity"
-require_relative "storage"       # Add storage for secure file handling
+require_relative "storage"       # Add storage for secure file handling"
 require 'io/console'             # For password input without echoing
 require 'json'
 
