@@ -12,7 +12,7 @@ require 'thread'                 # For mutex support
 $menu_mutex = Mutex.new
 $menu_condition = ConditionVariable.new
 $menu_paused = false
-
+$should_exit = false
 # Helper method for password input
 def get_password(prompt="Enter password: ")
   print prompt
@@ -255,6 +255,7 @@ def menu_loop()
       while $menu_paused
         $menu_condition.wait($menu_mutex)
       end
+      break if $should_exit
     end
 
     puts "\nMenu:"
@@ -347,7 +348,7 @@ def menu_loop()
   when "4"
     identity = PeerIdentity.new
     identity.create_identity
-  # Add this option to the menu loop
+    
   when "5"
     identity = PeerIdentity.new
     migrate_msg = identity.rotate_key
@@ -541,8 +542,10 @@ def menu_loop()
       puts e.backtrace.join("\n")
     end
   when "0"
-    puts "\n👋 Exiting."
-    exit
+    $menu_mutex.synchronize do
+      $should_exit = true
+    end
+    break
   else
     puts "Invalid option."
     end
