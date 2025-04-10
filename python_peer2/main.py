@@ -224,13 +224,26 @@ def handle_find_alternative_source():
         return
         
     try:
+        # First discover active peers
+        active_peers = discover_peers()
+        if not active_peers:
+            print("❌ No active peers found.")
+            return
+            
+        active_peer_names = [p["name"] for p in active_peers]
+        print(f"✅ Found {len(active_peers)} active peers: {', '.join(active_peer_names)}")
+        
         # Load known peers to find files
         with open("known_peers.json", "r") as f:
             peers_data = json.load(f)
         
-        # Create a mapping of peers having each file
+        # Create a mapping of files available from active peers only
         available_files = {}
         for peer_name, peer_info in peers_data.items():
+            # Skip offline peers
+            if peer_name not in active_peer_names:
+                continue
+                
             if isinstance(peer_info, dict) and "files" in peer_info:
                 for file_info in peer_info["files"]:
                     if isinstance(file_info, dict):
@@ -243,11 +256,11 @@ def handle_find_alternative_source():
                         })
         
         if not available_files:
-            print("❌ No files found in known peers.")
+            print("❌ No files found from active peers.")
             return
         
-        # Show available files
-        print("\n📃 Files available from all known peers:")
+        # Show available files from active peers
+        print("\n📃 Files available from active peers:")
         file_list = list(available_files.keys())
         for i, filename in enumerate(file_list):
             peers_with_file = [info["peer"] for info in available_files[filename]]
@@ -261,7 +274,7 @@ def handle_find_alternative_source():
         
         filename = file_list[file_idx]
         
-        # Show available sources for this file
+        # Show available sources for this file (all active)
         print(f"\n🌐 Available sources for '{filename}':")
         sources = available_files[filename]
         for i, source in enumerate(sources):
@@ -274,58 +287,48 @@ def handle_find_alternative_source():
             return
         
         selected_source = sources[source_idx]
-        original_peer = selected_source["peer"]
+        selected_peer_name = selected_source["peer"]
+        selected_peer = next(p for p in active_peers if p["name"] == selected_peer_name)
         
-        # Now find an active peer to download from
-        active_peers = discover_peers()
-        active_peer_names = [p["name"] for p in active_peers]
+        # Perform key exchange with the peer
+        session_key = perform_key_exchange_with_ruby(selected_peer["ip"], selected_peer["port"])
+        if not session_key:
+            print("❌ Key exchange failed.")
+            return
         
-        if original_peer in active_peer_names:
-            # Original peer is online, download directly
-            print(f"✅ Original peer '{original_peer}' is online. Downloading directly.")
-            peer = next(p for p in active_peers if p["name"] == original_peer)
-            
-            # Perform key exchange with the peer
-            session_key = perform_key_exchange_with_ruby(peer["ip"], peer["port"])
-            if not session_key:
-                print("❌ Key exchange failed.")
-                return
-            
-            identity_payload = sign_session_key(session_key)
-            response = send_identity_to_ruby(peer["ip"], peer["port"], identity_payload)
-            if response:
-                request_file(peer["ip"], peer["port"], filename, session_key, original_peer)
+        identity_payload = sign_session_key(session_key)
+        response = send_identity_to_ruby(selected_peer["ip"], selected_peer["port"], identity_payload)
+        if response:
+            # Check if we should verify against another peer's hash
+            if len(sources) > 1:
+                print("\nMultiple sources have this file. Would you like to verify against another peer's hash?")
+                verify = input("Verify against another source? (y/n): ").lower().strip() == 'y'
+                
+                if verify:
+                    # Show other sources for verification
+                    other_sources = [s for s in sources if s["peer"] != selected_peer_name]
+                    print("\nChoose a source to verify against:")
+                    for i, source in enumerate(other_sources):
+                        print(f"{i+1}. {source['peer']} (Hash: {source['hash']})")
+                    
+                    try:
+                        verify_idx = int(input("Verification source (number): ")) - 1
+                        if 0 <= verify_idx < len(other_sources):
+                            verification_peer = other_sources[verify_idx]["peer"]
+                            print(f"✅ Downloading from '{selected_peer_name}' with verification against '{verification_peer}'")
+                            request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, verification_peer)
+                        else:
+                            print("❌ Invalid selection, downloading without verification.")
+                            request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
+                    except ValueError:
+                        print("❌ Invalid input, downloading without verification.")
+                        request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
+                else:
+                    request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
             else:
-                print("❌ Error with identification")
+                request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
         else:
-            # Original peer is offline, try to find alternative source
-            print(f"⚠️ Original peer '{original_peer}' is offline. Looking for alternative sources...")
-            
-            # Ask which active peer to try
-            print("\n🔍 Active peers that might have the file:")
-            for i, peer in enumerate(active_peers):
-                print(f"{i+1}. {peer['name']} @ {peer['ip']}:{peer['port']}")
-            
-            peer_idx = int(input("\nWhich peer to try? (number): ")) - 1
-            if peer_idx < 0 or peer_idx >= len(active_peers):
-                print("❌ Invalid selection.")
-                return
-            
-            alternative_peer = active_peers[peer_idx]
-            
-            # Perform key exchange with the alternative peer
-            session_key = perform_key_exchange_with_ruby(alternative_peer["ip"], alternative_peer["port"])
-            if not session_key:
-                print("❌ Key exchange failed.")
-                return
-            
-            identity_payload = sign_session_key(session_key)
-            response = send_identity_to_ruby(alternative_peer["ip"], alternative_peer["port"], identity_payload)
-            if response:
-                print(f"⚠️ Downloading from alternative peer '{alternative_peer['name']}' with verification against original peer '{original_peer}'")
-                request_file(alternative_peer["ip"], alternative_peer["port"], filename, session_key, original_peer)
-            else:
-                print("❌ Error with identification")
+            print("❌ Error with identification")
         
     except Exception as e:
         print(f"❌ Error: {e}")
