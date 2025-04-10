@@ -22,9 +22,18 @@ class FileServer
         begin
           handle_client(socket)
         ensure
-          socket.close
+          # Only close the socket if it's not in a pending request
+          unless socket_in_pending_request?(socket)
+            socket.close
+          end
         end
       end
+    end
+  end
+
+  def socket_in_pending_request?(socket)
+    @mutex.synchronize do
+      @pending_requests.any? { |req| req[:socket] == socket }
     end
   end
 
@@ -47,6 +56,7 @@ class FileServer
       @mutex.synchronize do
         @pending_requests << {socket: socket, request: request}
       end
+      return  # Don't close the socket yet
     when "L"
       handle_file_list_request(socket)
     when "K"
@@ -316,53 +326,65 @@ class FileServer
       file_name = request["file_name"]
       puts "Processing request for: #{file_name}"
       
-      file_path = File.join("Files", file_name)
-      
-      unless File.exist?(file_path)
-        response = { status: "error", message: "File not found" }
+      begin
+        file_path = File.join("Files", file_name)
+        
+        unless File.exist?(file_path)
+          response = { status: "error", message: "File not found" }
+          socket.write("F")
+          socket.write([response.to_json.bytesize].pack("N"))
+          socket.write(response.to_json)
+          puts "❌ File not found: #{file_name}"
+          return true
+        end
+        
+        if consent == false
+          response = { status: "error", message: "File transfer rejected" }
+          socket.write("F")
+          socket.write([response.to_json.bytesize].pack("N"))
+          socket.write(response.to_json)
+          puts "❌ File transfer rejected"
+          return true
+        end
+        
+        file_data = File.binread(file_path)
+        cipher = OpenSSL::Cipher.new("aes-256-gcm")
+        cipher.encrypt
+        cipher.key = @session_key
+        iv = cipher.random_iv
+        cipher.iv = iv
+        
+        ciphertext = cipher.update(file_data) + cipher.final
+        tag = cipher.auth_tag
+        
+        # Send accepted response
+        response = { status: "accepted" }
         socket.write("F")
         socket.write([response.to_json.bytesize].pack("N"))
         socket.write(response.to_json)
-        puts "❌ File not found: #{file_name}"
+        
+        # Send encrypted data
+        socket.write("D")
+        socket.write([iv.bytesize].pack("N"))
+        socket.write(iv)
+        socket.write([tag.bytesize].pack("N"))
+        socket.write(tag)
+        socket.write([ciphertext.bytesize].pack("N"))
+        socket.write(ciphertext)
+        
+        puts "🔐 Encrypted file '#{file_name}' sent."
         return true
-      end
-      
-      if consent == false
-        response = { status: "error", message: "File transfer rejected" }
-        socket.write("F")
-        socket.write([response.to_json.bytesize].pack("N"))
-        socket.write(response.to_json)
-        puts "❌ File transfer rejected"
+      rescue => e
+        puts "❌ Error processing request: #{e.message}"
+        puts e.backtrace.join("\n")
         return true
+      ensure
+        begin
+          socket.close unless socket.closed?
+        rescue => e
+          puts "Error closing socket: #{e.message}"
+        end
       end
-      
-      file_data = File.binread(file_path)
-      cipher = OpenSSL::Cipher.new("aes-256-gcm")
-      cipher.encrypt
-      cipher.key = @session_key
-      iv = cipher.random_iv
-      cipher.iv = iv
-      
-      ciphertext = cipher.update(file_data) + cipher.final
-      tag = cipher.auth_tag
-      
-      # Send accepted response
-      response = { status: "accepted" }
-      socket.write("F")
-      socket.write([response.to_json.bytesize].pack("N"))
-      socket.write(response.to_json)
-      
-      # Send encrypted data
-      socket.write("D")
-      socket.write([iv.bytesize].pack("N"))
-      socket.write(iv)
-      socket.write([tag.bytesize].pack("N"))
-      socket.write(tag)
-      socket.write([ciphertext.bytesize].pack("N"))
-      socket.write(ciphertext)
-      
-      puts "🔐 Encrypted file '#{file_name}' sent."
-      return true
     end
   end
   
