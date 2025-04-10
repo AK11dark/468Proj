@@ -173,18 +173,23 @@ class FileServer
       return
     end
 
-    puts "accept file transfer? y/n"
-    response = STDIN.gets.chomp
-    if response == "y"
-      puts "✅ File transfer accepted"
-    else
+    # Send a special response to indicate we need user consent
+    response = { status: "consent_required", message: "File transfer requires consent" }
+    socket.write("F")
+    socket.write([response.to_json.bytesize].pack("N"))
+    socket.write(response.to_json)
+
+    # Wait for the client to send the consent response
+    consent_len = socket.read(4).unpack1("N")
+    consent_payload = socket.read(consent_len)
+    consent_response = JSON.parse(consent_payload)
+
+    if consent_response["consent"] != "y"
       puts "❌ File transfer rejected"
-      response = { status: "error", message: "File transfer rejected" }
-      socket.write("F")
-      socket.write([response.to_json.bytesize].pack("N"))
-      socket.write(response.to_json)
       return
     end
+
+    puts "✅ File transfer accepted"
 
     file_data = File.binread(file_path)
     # ✅ Encrypt the file with AES-GCM and the session key

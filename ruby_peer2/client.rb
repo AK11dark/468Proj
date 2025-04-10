@@ -24,6 +24,34 @@ def request_file(ip, port, filename, session_key, original_peer_name=nil)
   response_len = socket.read(4).unpack1('N')
   response = JSON.parse(socket.read(response_len))
 
+  if response["status"] == "consent_required"
+    puts "📥 Peer requested file: #{filename}"
+    print "accept file transfer? y/n: "
+    consent = gets.chomp.downcase
+    
+    # Send consent response
+    consent_response = { "consent" => consent }
+    socket.write([consent_response.to_json.bytesize].pack('N'))
+    socket.write(consent_response.to_json)
+    
+    if consent != "y"
+      puts "❌ File transfer rejected"
+      socket.close
+      return
+    end
+    
+    # Read the next response
+    response_type = socket.read(1)
+    if response_type != "F"
+      puts "❌ Unexpected response"
+      socket.close
+      return
+    end
+    
+    response_len = socket.read(4).unpack1('N')
+    response = JSON.parse(socket.read(response_len))
+  end
+
   if response["status"] == "accepted"
     # Expect "D" next
     data_type = socket.read(1)
