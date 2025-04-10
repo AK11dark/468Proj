@@ -174,7 +174,7 @@ def handle_file_request(socket)
   end
 
   puts "accept file transfer? y/n"
-  response = socket.gets.chomp
+  response = STDIN.gets.chomp
   if response == "y"
     puts "✅ File transfer accepted"
   else

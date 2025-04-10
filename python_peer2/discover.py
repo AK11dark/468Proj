@@ -43,7 +43,7 @@ class PeerListener(ServiceListener):
         # Optional: You can re-fetch info here
         pass
 
-def discover_peers(timeout=10):
+def discover_peers(timeout=5):
     zeroconf = Zeroconf()
     listener = PeerListener()
     browser = ServiceBrowser(zeroconf, "_peer._tcp.local.", listener)
