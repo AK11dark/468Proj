@@ -34,13 +34,9 @@ class FileServer
       puts "command recieve, peer is migrating key"
       handle_key_migration(socket)
     when "F"
-      puts "test input"
-      if gets.chomp == "y"
-        puts "you inputted yes"
-      else
-        puts "you inputted no"
-      end
+      $run = false
       handle_file_request(socket)
+      $run = true
     when "L"
       handle_file_list_request(socket)
     when "K"

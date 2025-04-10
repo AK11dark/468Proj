@@ -241,31 +241,11 @@ def ensure_known_peers_file_exists
   end
 end
 
-# Ensure known_peers.json file exists at startup
-ensure_known_peers_file_exists
-
-# Start OOP FileServer in a thread
-file_server = FileServer.new
-Thread.new do
-  file_server.start
-end
-
-
-# Keep a reference to the announcer so it doesn't get GC'd
-announcer = DNSSD::PeerAnnouncer.new
-
-# Store our own service name to prevent self-discovery
-PeerFinder.set_own_service_name(announcer.service_name)
-
-# Start advertising in a thread
-Thread.new do
-  announcer.start
-end
-
-puts "\n🔁 mDNS advertising started."
-puts "📡 mDNS discovery ready."
-
-loop do
+#global variable to control the loop for any consent required prompts.
+$run = true
+def menu_loop()
+  loop do
+    break if !$run
   puts "\nMenu:"
   puts "1. Discover peers"
   puts "2. Request File"
@@ -554,5 +534,33 @@ loop do
     exit
   else
     puts "Invalid option."
+    end
   end
 end
+
+
+# Ensure known_peers.json file exists at startup
+ensure_known_peers_file_exists
+
+# Start OOP FileServer in a thread
+file_server = FileServer.new
+Thread.new do
+  file_server.start
+end
+
+
+# Keep a reference to the announcer so it doesn't get GC'd
+announcer = DNSSD::PeerAnnouncer.new
+
+# Store our own service name to prevent self-discovery
+PeerFinder.set_own_service_name(announcer.service_name)
+
+# Start advertising in a thread
+Thread.new do
+  announcer.start
+end
+
+puts "\n🔁 mDNS advertising started."
+puts "📡 mDNS discovery ready."
+
+menu_loop
