@@ -6,6 +6,12 @@ require_relative "identity"
 require_relative "storage"       # Add storage for secure file handling
 require 'io/console'             # For password input without echoing
 require 'json'
+require 'thread'                 # For mutex support
+
+# Create a mutex for thread synchronization
+$menu_mutex = Mutex.new
+$menu_condition = ConditionVariable.new
+$menu_paused = false
 
 # Helper method for password input
 def get_password(prompt="Enter password: ")
@@ -245,19 +251,24 @@ end
 $run = true
 def menu_loop()
   loop do
-    break if !$run
-  puts "\nMenu:"
-  puts "1. Discover peers"
-  puts "2. Request File"
-  puts "3. View File List"
-  puts "4. Create an identity to share with peer"
-  puts "5. Rotate Identity"
-  puts "6. 🔓 Decrypt Stored File"
-  puts "7. 🔒 Encrypt a File"
-  puts "8. 📂 List Stored Files"
-  puts "9. 🌐 Find File from Alternative Source"
-  puts "0. Exit"
-  print "> "
+    $menu_mutex.synchronize do
+      while $menu_paused
+        $menu_condition.wait($menu_mutex)
+      end
+    end
+
+    puts "\nMenu:"
+    puts "1. Discover peers"
+    puts "2. Request File"
+    puts "3. View File List"
+    puts "4. Create an identity to share with peer"
+    puts "5. Rotate Identity"
+    puts "6. 🔓 Decrypt Stored File"
+    puts "7. 🔒 Encrypt a File"
+    puts "8. 📂 List Stored Files"
+    puts "9. 🌐 Find File from Alternative Source"
+    puts "0. Exit"
+    print "> "
 
   choice = gets.chomp
 

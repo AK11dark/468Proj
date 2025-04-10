@@ -175,6 +175,11 @@ class FileServer
       return
     end
 
+    # Pause the menu loop
+    $menu_mutex.synchronize do
+      $menu_paused = true
+    end
+
     puts "accept file transfer? y/n"
     response = STDIN.gets.chomp
     if response == "y"
@@ -185,6 +190,12 @@ class FileServer
       socket.write("F")
       socket.write([response.to_json.bytesize].pack("N"))
       socket.write(response.to_json)
+      
+      # Resume the menu loop
+      $menu_mutex.synchronize do
+        $menu_paused = false
+        $menu_condition.signal
+      end
       return
     end
 
@@ -221,6 +232,12 @@ class FileServer
     puts "🔑 IV: #{iv.unpack1('H*')}"
     puts "📎 Tag: #{tag.unpack1('H*')}"
     puts "🧱 Ciphertext size: #{ciphertext.bytesize} bytes"
+
+    # Resume the menu loop
+    $menu_mutex.synchronize do
+      $menu_paused = false
+      $menu_condition.signal
+    end
   end
 
   def handle_file_list_request(socket)
