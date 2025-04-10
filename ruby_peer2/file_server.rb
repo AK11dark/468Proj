@@ -153,149 +153,149 @@ class FileServer
     peers[username] = public_key_pem
     File.write("known_peers.json", JSON.pretty_generate(peers))
   end
-end
-def handle_file_request(socket)
-  len = socket.read(4).unpack1("N")
-  payload = socket.read(len)
-  request = JSON.parse(payload)
 
-  file_name = request["file_name"]
-  puts "📥 Peer requested file: #{file_name}"
+  def handle_file_request(socket)
+    len = socket.read(4).unpack1("N")
+    payload = socket.read(len)
+    request = JSON.parse(payload)
 
-  file_path = File.join("Files", file_name)
+    file_name = request["file_name"]
+    puts "📥 Peer requested file: #{file_name}"
 
-  unless File.exist?(file_path)
-    response = { status: "error", message: "File not found" }
-    socket.write("F")
-    socket.write([response.to_json.bytesize].pack("N"))
-    socket.write(response.to_json)
-    puts "❌ File not found: #{file_name}"
-    return
-  end
+    file_path = File.join("Files", file_name)
 
-  puts "accept file transfer? y/n"
-  response = STDIN.gets.chomp
-  if response == "y"
-    puts "✅ File transfer accepted"
-  else
-    puts "❌ File transfer rejected"
-    response = { status: "error", message: "File transfer rejected" }
-    socket.write("F")
-    socket.write([response.to_json.bytesize].pack("N"))
-    socket.write(response.to_json)
-    return
-  end
-
-  file_data = File.binread(file_path)
-  # ✅ Encrypt the file with AES-GCM and the session key
-  cipher = OpenSSL::Cipher.new("aes-256-gcm")
-  cipher.encrypt
-  cipher.key = @session_key
-  iv = cipher.random_iv
-  cipher.iv = iv
-
-  ciphertext = cipher.update(file_data) + cipher.final
-  tag = cipher.auth_tag
-
-  # ✅ Send accepted response
-  response = { status: "accepted" }
-  socket.write("F")
-  socket.write([response.to_json.bytesize].pack("N"))
-  socket.write(response.to_json)
-
-  # ✅ Send encrypted data
-  socket.write("D")
-
-  socket.write([iv.bytesize].pack("N"))
-  socket.write(iv)
-
-  socket.write([tag.bytesize].pack("N"))
-  socket.write(tag)
-
-  socket.write([ciphertext.bytesize].pack("N"))
-  socket.write(ciphertext)
-
-  puts "🔐 Encrypted file '#{file_name}' sent."
-  puts "🔑 IV: #{iv.unpack1('H*')}"
-  puts "📎 Tag: #{tag.unpack1('H*')}"
-  puts "🧱 Ciphertext size: #{ciphertext.bytesize} bytes"
-end
-
-
-def handle_file_list_request(socket)
-  dir = "Files"
-  unless Dir.exist?(dir)
-    Dir.mkdir(dir)
-  end
-
-  files = Dir.entries(dir).select { |f| File.file?(File.join(dir, f)) }
-  
-  # Create a list of files with their hashes
-  file_list = files.map do |filename|
-    file_path = File.join(dir, filename)
-    # Calculate SHA-256 hash of file
-    file_hash = calculate_file_hash(file_path)
-    { name: filename, hash: file_hash }
-  end
-
-  response = file_list.to_json
-  socket.write("L")
-  socket.write([response.bytesize].pack("N"))
-  socket.write(response)
-
-  puts "📃 Sent file list with hashes: #{file_list.inspect}"
-end
-
-def calculate_file_hash(file_path)
-  # Calculate SHA-256 hash of a file
-  digest = OpenSSL::Digest::SHA256.new
-  File.open(file_path, 'rb') do |f|
-    buffer = ""
-    # Read the file in chunks to handle large files
-    while f.read(4096, buffer)
-      digest.update(buffer)
+    unless File.exist?(file_path)
+      response = { status: "error", message: "File not found" }
+      socket.write("F")
+      socket.write([response.to_json.bytesize].pack("N"))
+      socket.write(response.to_json)
+      puts "❌ File not found: #{file_name}"
+      return
     end
-  end
-  digest.hexdigest
-end
 
-def handle_key_migration(socket)
-  len = socket.read(4).unpack1("N")
-  payload = socket.read(len)
-  message = JSON.parse(payload)
-
-  username = message["username"]
-  new_key_pem = message["new_key"]
-  signature = Base64.decode64(message["signature"])
-
-  puts "🔍 Received new_key PEM:\n#{new_key_pem.inspect}"
-
-  known_peers = load_known_peers
-
-  unless known_peers.key?(username)
-    puts "❌ Cannot migrate unknown peer: #{username}"
-    socket.write("R")
-    return
-  end
-
-  old_key = OpenSSL::PKey::EC.new(known_peers[username])
-
-  begin
-    # ✅ FIX: verify signature over raw new_key_pem (not hashed)
-    valid = old_key.dsa_verify_asn1(new_key_pem, signature)
-
-    if valid
-      puts "✅ Signature verified for key migration of #{username}"
-      known_peers[username] = new_key_pem
-      save_known_peer(username, new_key_pem)
-      socket.write("M")
+    puts "accept file transfer? y/n"
+    response = STDIN.gets.chomp
+    if response == "y"
+      puts "✅ File transfer accepted"
     else
-      puts "❌ Signature verification failed for #{username}"
+      puts "❌ File transfer rejected"
+      response = { status: "error", message: "File transfer rejected" }
+      socket.write("F")
+      socket.write([response.to_json.bytesize].pack("N"))
+      socket.write(response.to_json)
+      return
+    end
+
+    file_data = File.binread(file_path)
+    # ✅ Encrypt the file with AES-GCM and the session key
+    cipher = OpenSSL::Cipher.new("aes-256-gcm")
+    cipher.encrypt
+    cipher.key = @session_key
+    iv = cipher.random_iv
+    cipher.iv = iv
+
+    ciphertext = cipher.update(file_data) + cipher.final
+    tag = cipher.auth_tag
+
+    # ✅ Send accepted response
+    response = { status: "accepted" }
+    socket.write("F")
+    socket.write([response.to_json.bytesize].pack("N"))
+    socket.write(response.to_json)
+
+    # ✅ Send encrypted data
+    socket.write("D")
+
+    socket.write([iv.bytesize].pack("N"))
+    socket.write(iv)
+
+    socket.write([tag.bytesize].pack("N"))
+    socket.write(tag)
+
+    socket.write([ciphertext.bytesize].pack("N"))
+    socket.write(ciphertext)
+
+    puts "🔐 Encrypted file '#{file_name}' sent."
+    puts "🔑 IV: #{iv.unpack1('H*')}"
+    puts "📎 Tag: #{tag.unpack1('H*')}"
+    puts "🧱 Ciphertext size: #{ciphertext.bytesize} bytes"
+  end
+
+  def handle_file_list_request(socket)
+    dir = "Files"
+    unless Dir.exist?(dir)
+      Dir.mkdir(dir)
+    end
+
+    files = Dir.entries(dir).select { |f| File.file?(File.join(dir, f)) }
+    
+    # Create a list of files with their hashes
+    file_list = files.map do |filename|
+      file_path = File.join(dir, filename)
+      # Calculate SHA-256 hash of file
+      file_hash = calculate_file_hash(file_path)
+      { name: filename, hash: file_hash }
+    end
+
+    response = file_list.to_json
+    socket.write("L")
+    socket.write([response.bytesize].pack("N"))
+    socket.write(response)
+
+    puts "📃 Sent file list with hashes: #{file_list.inspect}"
+  end
+
+  def calculate_file_hash(file_path)
+    # Calculate SHA-256 hash of a file
+    digest = OpenSSL::Digest::SHA256.new
+    File.open(file_path, 'rb') do |f|
+      buffer = ""
+      # Read the file in chunks to handle large files
+      while f.read(4096, buffer)
+        digest.update(buffer)
+      end
+    end
+    digest.hexdigest
+  end
+
+  def handle_key_migration(socket)
+    len = socket.read(4).unpack1("N")
+    payload = socket.read(len)
+    message = JSON.parse(payload)
+
+    username = message["username"]
+    new_key_pem = message["new_key"]
+    signature = Base64.decode64(message["signature"])
+
+    puts "🔍 Received new_key PEM:\n#{new_key_pem.inspect}"
+
+    known_peers = load_known_peers
+
+    unless known_peers.key?(username)
+      puts "❌ Cannot migrate unknown peer: #{username}"
+      socket.write("R")
+      return
+    end
+
+    old_key = OpenSSL::PKey::EC.new(known_peers[username])
+
+    begin
+      # ✅ FIX: verify signature over raw new_key_pem (not hashed)
+      valid = old_key.dsa_verify_asn1(new_key_pem, signature)
+
+      if valid
+        puts "✅ Signature verified for key migration of #{username}"
+        known_peers[username] = new_key_pem
+        save_known_peer(username, new_key_pem)
+        socket.write("M")
+      else
+        puts "❌ Signature verification failed for #{username}"
+        socket.write("R")
+      end
+    rescue => e
+      puts "❌ Exception during migration verification: #{e}"
       socket.write("R")
     end
-  rescue => e
-    puts "❌ Exception during migration verification: #{e}"
-    socket.write("R")
   end
 end
 
