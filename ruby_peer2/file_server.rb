@@ -1,13 +1,15 @@
 require 'socket'
 require 'json'
 require 'openssl'
+require 'thread'
 
 class FileServer
   def initialize(host = '0.0.0.0', port = 5001)
     @host = host
     @port = port
     @session_key = nil
-
+    @pending_requests = []
+    @mutex = Mutex.new
   end
 
   def start
@@ -34,7 +36,17 @@ class FileServer
       puts "command recieve, peer is migrating key"
       handle_key_migration(socket)
     when "F"
-      puts "accept file transfer? y/n"
+      len = socket.read(4).unpack1("N")
+      payload = socket.read(len)
+      request = JSON.parse(payload)
+      file_name = request["file_name"]
+      
+      puts "📥 File request received for: #{file_name}"
+      puts "Type 'y' to accept or 'n' to reject the file transfer"
+      
+      @mutex.synchronize do
+        @pending_requests << {socket: socket, request: request}
+      end
     when "L"
       handle_file_list_request(socket)
     when "K"
@@ -290,6 +302,73 @@ class FileServer
     rescue => e
       puts "❌ Exception during migration verification: #{e}"
       socket.write("R")
+    end
+  end
+
+  def process_pending_request(consent)
+    @mutex.synchronize do
+      return false if @pending_requests.empty?
+      
+      req = @pending_requests.shift
+      socket = req[:socket]
+      request = req[:request]
+      
+      file_name = request["file_name"]
+      puts "Processing request for: #{file_name}"
+      
+      file_path = File.join("Files", file_name)
+      
+      unless File.exist?(file_path)
+        response = { status: "error", message: "File not found" }
+        socket.write("F")
+        socket.write([response.to_json.bytesize].pack("N"))
+        socket.write(response.to_json)
+        puts "❌ File not found: #{file_name}"
+        return true
+      end
+      
+      if consent == false
+        response = { status: "error", message: "File transfer rejected" }
+        socket.write("F")
+        socket.write([response.to_json.bytesize].pack("N"))
+        socket.write(response.to_json)
+        puts "❌ File transfer rejected"
+        return true
+      end
+      
+      file_data = File.binread(file_path)
+      cipher = OpenSSL::Cipher.new("aes-256-gcm")
+      cipher.encrypt
+      cipher.key = @session_key
+      iv = cipher.random_iv
+      cipher.iv = iv
+      
+      ciphertext = cipher.update(file_data) + cipher.final
+      tag = cipher.auth_tag
+      
+      # Send accepted response
+      response = { status: "accepted" }
+      socket.write("F")
+      socket.write([response.to_json.bytesize].pack("N"))
+      socket.write(response.to_json)
+      
+      # Send encrypted data
+      socket.write("D")
+      socket.write([iv.bytesize].pack("N"))
+      socket.write(iv)
+      socket.write([tag.bytesize].pack("N"))
+      socket.write(tag)
+      socket.write([ciphertext.bytesize].pack("N"))
+      socket.write(ciphertext)
+      
+      puts "🔐 Encrypted file '#{file_name}' sent."
+      return true
+    end
+  end
+  
+  def has_pending_requests?
+    @mutex.synchronize do
+      return !@pending_requests.empty?
     end
   end
 end

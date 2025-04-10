@@ -266,6 +266,11 @@ puts "\n🔁 mDNS advertising started."
 puts "📡 mDNS discovery ready."
 
 loop do
+  # Check for pending file transfer requests
+  if file_server.has_pending_requests?
+    puts "\n📥 There are pending file transfer requests. Enter 'y' to accept or 'n' to reject."
+  end
+
   puts "\nMenu:"
   puts "1. Discover peers"
   puts "2. Request File"
@@ -283,11 +288,19 @@ loop do
 
   case choice
   when "y"
-    puts "accept file transfer"
-    file_server.handle_file_request(socket, consent=true)
+    puts "Accepting file transfer..."
+    if file_server.process_pending_request(true)
+      puts "✅ File transfer accepted and processed."
+    else
+      puts "❓ No pending file transfer requests."
+    end
   when "n"
-    puts "reject file transfer"
-    file_server.handle_file_request(socket, consent=false)
+    puts "Rejecting file transfer..."
+    if file_server.process_pending_request(false)
+      puts "❌ File transfer rejected."
+    else
+      puts "❓ No pending file transfer requests."
+    end
   when "1"
     peers = PeerFinder.discover_peers(5)
     if peers.empty?
