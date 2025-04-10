@@ -233,38 +233,52 @@ def handle_find_alternative_source():
         active_peer_names = [p["name"] for p in active_peers]
         print(f"✅ Found {len(active_peers)} active peers: {', '.join(active_peer_names)}")
         
-        # Load known peers to find files
+        # Check for new peers and request their file lists first
         with open("known_peers.json", "r") as f:
             peers_data = json.load(f)
         
-        # Create a mapping of files available from active peers only
-        available_files = {}
+        new_peers = [p for p in active_peers if p["name"] not in peers_data]
+        if new_peers:
+            print("\n🔄 Requesting file lists from newly discovered peers...")
+            for peer in new_peers:
+                print(f"Requesting file list from {peer['name']}...")
+                request_file_list(peer["ip"], peer["port"], peer["name"])
+            
+            # Reload the peers data after getting new file lists
+            with open("known_peers.json", "r") as f:
+                peers_data = json.load(f)
+        
+        # Create a mapping of all known files regardless of peer status
+        all_known_files = {}
         for peer_name, peer_info in peers_data.items():
-            # Skip offline peers
-            if peer_name not in active_peer_names:
-                continue
-                
             if isinstance(peer_info, dict) and "files" in peer_info:
                 for file_info in peer_info["files"]:
                     if isinstance(file_info, dict):
                         filename = file_info["name"]
-                        if filename not in available_files:
-                            available_files[filename] = []
-                        available_files[filename].append({
+                        if filename not in all_known_files:
+                            all_known_files[filename] = []
+                        all_known_files[filename].append({
                             "peer": peer_name,
-                            "hash": file_info["hash"]
+                            "hash": file_info["hash"],
+                            "active": peer_name in active_peer_names
                         })
         
-        if not available_files:
-            print("❌ No files found from active peers.")
+        if not all_known_files:
+            print("❌ No files found in known peers.")
             return
         
-        # Show available files from active peers
-        print("\n📃 Files available from active peers:")
-        file_list = list(available_files.keys())
+        # Show all available files and indicate which are from active peers
+        print("\n📃 All files known in the network:")
+        file_list = list(all_known_files.keys())
         for i, filename in enumerate(file_list):
-            peers_with_file = [info["peer"] for info in available_files[filename]]
-            print(f"{i+1}. {filename} (Available from: {', '.join(peers_with_file)})")
+            # Separate active and inactive peers
+            active_peers_with_file = [info["peer"] for info in all_known_files[filename] if info["active"]]
+            inactive_peers_with_file = [info["peer"] for info in all_known_files[filename] if not info["active"]]
+            
+            active_status = f"✅ Available from: {', '.join(active_peers_with_file)}" if active_peers_with_file else "❌ No active peers have this file"
+            inactive_status = f" (Also known by inactive peers: {', '.join(inactive_peers_with_file)})" if inactive_peers_with_file else ""
+            
+            print(f"{i+1}. {filename} - {active_status}{inactive_status}")
         
         # Ask which file to download
         file_idx = int(input("\nWhich file do you want to download? (number): ")) - 1
@@ -274,19 +288,25 @@ def handle_find_alternative_source():
         
         filename = file_list[file_idx]
         
-        # Show available sources for this file (all active)
-        print(f"\n🌐 Available sources for '{filename}':")
-        sources = available_files[filename]
-        for i, source in enumerate(sources):
+        # Check if any active peers have this file
+        active_sources = [s for s in all_known_files[filename] if s["active"]]
+        
+        if not active_sources:
+            print(f"❌ No active peers have the file '{filename}'. Try again when peers are online.")
+            return
+        
+        # Show available active sources for this file
+        print(f"\n🌐 Active sources for '{filename}':")
+        for i, source in enumerate(active_sources):
             print(f"{i+1}. {source['peer']} (Hash: {source['hash']})")
         
         # Ask which source to use
         source_idx = int(input("\nWhich source do you want to use? (number): ")) - 1
-        if source_idx < 0 or source_idx >= len(sources):
+        if source_idx < 0 or source_idx >= len(active_sources):
             print("❌ Invalid selection.")
             return
         
-        selected_source = sources[source_idx]
+        selected_source = active_sources[source_idx]
         selected_peer_name = selected_source["peer"]
         selected_peer = next(p for p in active_peers if p["name"] == selected_peer_name)
         
@@ -300,16 +320,19 @@ def handle_find_alternative_source():
         response = send_identity_to_ruby(selected_peer["ip"], selected_peer["port"], identity_payload)
         if response:
             # Check if we should verify against another peer's hash
-            if len(sources) > 1:
-                print("\nMultiple sources have this file. Would you like to verify against another peer's hash?")
+            all_sources = all_known_files[filename]
+            other_sources = [s for s in all_sources if s["peer"] != selected_peer_name]
+            
+            if other_sources:
+                print("\nWould you like to verify against another peer's hash?")
                 verify = input("Verify against another source? (y/n): ").lower().strip() == 'y'
                 
                 if verify:
-                    # Show other sources for verification
-                    other_sources = [s for s in sources if s["peer"] != selected_peer_name]
-                    print("\nChoose a source to verify against:")
+                    # Show other sources for verification (including inactive for hash checking)
+                    print("\nChoose a source to verify against (active or inactive):")
                     for i, source in enumerate(other_sources):
-                        print(f"{i+1}. {source['peer']} (Hash: {source['hash']})")
+                        status = "✅ Active" if source["active"] else "❌ Inactive"
+                        print(f"{i+1}. {source['peer']} ({status}) - Hash: {source['hash']}")
                     
                     try:
                         verify_idx = int(input("Verification source (number): ")) - 1
