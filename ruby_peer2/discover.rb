@@ -9,15 +9,9 @@ module PeerFinder
   
   # Store our own service name to avoid self-discovery
   @@own_service_name = nil
-  @@own_service_id = nil
   
   def self.set_own_service_name(service_name)
     @@own_service_name = service_name
-    # Extract the unique identifier (e.g., "peer-b9ecf4f8" from "peer-b9ecf4f8._peer._tcp.local.")
-    if service_name && service_name.match(/^(peer-[a-f0-9]+)/)
-      @@own_service_id = $1
-      puts "Setting own service ID: #{@@own_service_id}"
-    end
     puts "Setting own service name: #{@@own_service_name}"
   end
 
@@ -35,7 +29,6 @@ module PeerFinder
     socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, membership)
     
     discovered_peers = {}
-    puts "👀 Starting peer discovery (looking for #{SERVICE_TYPE})"
 
     begin
       # Send PTR query
@@ -55,30 +48,14 @@ module PeerFinder
         # Get service names
         service_names = response.answer.select { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::PTR) }
                                        .map { |_, _, r| r.name.to_s }
-        
-        if !service_names.empty?
-          puts "📡 Received response with #{service_names.length} services"
-        end
 
         service_names.each do |name|
           next if discovered_peers[name]
-          
-          puts "🔍 Examining service: #{name}"
           
           # Skip if this is our own service
           if @@own_service_name && name == @@own_service_name
             puts "Skipping own service: #{name}"
             next
-          end
-          
-          # Also check based on the unique service ID, but only for Ruby peers (peer-XXXX format)
-          # Python peers have a different format (python-peer) so we shouldn't filter them
-          if @@own_service_id && name && name.start_with?("peer-")
-            peer_id_match = name.match(/^(peer-[a-f0-9]+)/)
-            if peer_id_match && peer_id_match[1] == @@own_service_id
-              puts "Skipping own service by ID match: #{name}"
-              next
-            end
           end
 
           ip = response.additional.find { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::A) }&.last&.address&.to_s
@@ -93,6 +70,17 @@ module PeerFinder
     ensure
       socket.close
     end
+
+    # Print once at the end
+    if discovered_peers.empty?
+      puts "❌ No peers found."
+    else
+      puts "✅ Discovered peers:"
+      discovered_peers.each_with_index do |(_, peer), i|
+        puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
+      end
+    end
+
     discovered_peers.values
   end
 end
