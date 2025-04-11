@@ -31,9 +31,15 @@ module PeerFinder
         socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_LOOP, 1)
       end
       
-      # Note: We're not binding to the multicast port because it can prevent
-      # receiving broadcasts from Python client on some platforms
-      # Instead we'll just listen for responses after sending the query
+      # Bind to any port on 0.0.0.0 to receive multicast traffic
+      socket.bind('0.0.0.0', 0)
+      
+      # Join multicast group (needed for Ruby-Ruby discovery)
+      # This is done without restricting port binding which allows Python discovery too
+      ip_mreq = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
+      socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, ip_mreq)
+      
+      puts "🔍 Joined multicast group #{MDNS_ADDR} for discovery"
       
       # Send PTR query
       query = Resolv::DNS::Message.new(0)
@@ -48,7 +54,7 @@ module PeerFinder
         readers, = IO.select([socket], [], [], 1)
         next unless readers
 
-        buf, = socket.recvfrom(2048)
+        buf, sender = socket.recvfrom(2048)
         response = Resolv::DNS::Message.decode(buf)
 
         # Get service names
@@ -64,8 +70,27 @@ module PeerFinder
             next
           end
 
-          ip = response.additional.find { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::A) }&.last&.address&.to_s
-          port = response.additional.find { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::SRV) }&.last&.port
+          ip = response.additional.find { |n, _, r| 
+            r.is_a?(Resolv::DNS::Resource::IN::A)
+          }&.last&.address&.to_s
+
+          # If we couldn't find IP in the A record, try TXT records
+          if ip.nil?
+            txt = response.additional.find { |n, _, r| 
+              r.is_a?(Resolv::DNS::Resource::IN::TXT) && 
+              n.to_s == name
+            }&.last
+            
+            if txt
+              address_txt = txt.strings.find { |s| s.start_with?('address=') }
+              ip = address_txt&.split('=')&.last
+            end
+          end
+
+          port = response.additional.find { |n, _, r| 
+            r.is_a?(Resolv::DNS::Resource::IN::SRV) && 
+            n.to_s == name
+          }&.last&.port
 
           if ip && port
             discovered_peers[name] = { name: name, ip: ip, port: port }
@@ -74,6 +99,13 @@ module PeerFinder
         end
       end
     ensure
+      # Leave multicast group before closing
+      begin
+        ip_mreq = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
+        socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_DROP_MEMBERSHIP, ip_mreq)
+      rescue
+        # Ignore errors when leaving multicast group
+      end
       socket.close
     end
 
