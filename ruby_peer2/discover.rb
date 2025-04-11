@@ -58,14 +58,31 @@ module PeerFinder
           # Extract hostname part for comparison
           hostname = name.split("._peer._tcp.local.")[0]
           
-          # Skip if this is our own service based on hostname part
-          if @@own_hostname && hostname == @@own_hostname
-            puts "Skipping own service with hostname: #{hostname}"
+          # Skip if this is our own service by comparing both hostname and full service name
+          if (@@own_hostname && hostname == @@own_hostname) || (@@own_service_name && name == @@own_service_name)
+            puts "⚠️ Skipping own service: #{name} (#{hostname})"
             next
           end
 
-          ip = response.additional.find { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::A) }&.last&.address&.to_s
-          port = response.additional.find { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::SRV) }&.last&.port
+          # Get additional information from the packet
+          ip = nil
+          port = nil
+          
+          # Process all additional records to find IP and port
+          response.additional.each do |record_name, ttl, record|
+            if record.is_a?(Resolv::DNS::Resource::IN::A) && record_name.to_s.include?(hostname)
+              ip = record.address.to_s
+            elsif record.is_a?(Resolv::DNS::Resource::IN::SRV) && record_name.to_s == name
+              port = record.port
+            end
+          end
+
+          # Double-check to ensure this isn't our own peer
+          own_ip = local_ip()
+          if ip == own_ip && hostname == @@own_hostname
+            puts "🛑 Filtering own peer by IP and hostname match: #{hostname} @ #{ip}"
+            next
+          end
 
           if ip && port
             discovered_peers[name] = { name: name, ip: ip, port: port }
@@ -87,7 +104,37 @@ module PeerFinder
       end
     end
 
+    # Final filter - remove any peers that match our hostname
+    if @@own_hostname
+      discovered_peers.reject! do |name, peer|
+        hostname_match = name.split("._peer._tcp.local.")[0] == @@own_hostname
+        if hostname_match
+          puts "🔴 Removing own service from final results: #{name}"
+        end
+        hostname_match
+      end
+    end
+
     discovered_peers.values
+  end
+  
+  # Helper method to get local IP
+  def self.local_ip
+    # Try the standard approach first
+    begin
+      udp = UDPSocket.new
+      udp.connect("8.8.8.8", 1)
+      ip = udp.addr.last
+      udp.close
+      return ip
+    rescue => e
+      puts "Warning: Standard IP detection failed: #{e.message}"
+    end
+
+    # Fallback method: find a suitable interface
+    Socket.ip_address_list.detect do |addr|
+      addr.ipv4? && !addr.ipv4_loopback? && !addr.ipv4_multicast?
+    end&.ip_address || "127.0.0.1"
   end
 end
 
