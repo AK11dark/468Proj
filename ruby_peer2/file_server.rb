@@ -4,12 +4,22 @@ require 'openssl'
 require 'thread'
 
 class FileServer
-  def initialize(host = '0.0.0.0', port = 5001)
+  attr_reader :port
+  
+  def initialize(host = '0.0.0.0', port = nil)
     @host = host
-    @port = port
+    @port = port || find_available_port
     @session_key = nil
     @pending_requests = []
     @mutex = Mutex.new
+  end
+
+  def find_available_port
+    server = TCPServer.new('0.0.0.0', 0)
+    port = server.addr[1]
+    server.close
+    puts "[Ruby File Server] Selected available port: #{port}"
+    port
   end
 
   def start

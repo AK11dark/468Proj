@@ -9,13 +9,22 @@ module DNSSD
   class PeerAnnouncer
     attr_reader :service_name, :ip, :port, :network_port
 
-    def initialize(port: 5000, network_port: 5001)
-      @port = port
+    def initialize(port: nil, network_port: nil)
+      @port = port || find_available_port
       @network_port = network_port
       @service_name = "peer-#{SecureRandom.hex(4)}._peer._tcp.local."
       @hostname = @service_name.split("._peer._tcp.local.")[0]
       @ip = local_ip
       @running = false
+    end
+
+    def find_available_port
+      server = UDPSocket.new
+      server.bind('0.0.0.0', 0)
+      port = server.addr[1]
+      server.close
+      puts "[Advertiser] Selected available port: #{port}"
+      port
     end
 
     def start
@@ -27,7 +36,7 @@ module DNSSD
         announce_loop
       end
 
-      puts "[Advertiser] Announcing #{@service_name} on #{@ip}:#{@port}"
+      puts "[Advertiser] Announcing #{@service_name} on #{@ip}:#{@port} (discovery) and #{@ip}:#{@network_port} (file transfer)"
     end
 
     def stop

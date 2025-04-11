@@ -250,9 +250,8 @@ Thread.new do
   file_server.start
 end
 
-
 # Keep a reference to the announcer so it doesn't get GC'd
-announcer = DNSSD::PeerAnnouncer.new
+announcer = DNSSD::PeerAnnouncer.new(network_port: file_server.port)
 
 # Store our own service name to prevent self-discovery
 PeerFinder.set_own_service_name(announcer.service_name)
