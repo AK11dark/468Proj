@@ -250,8 +250,9 @@ Thread.new do
   file_server.start
 end
 
+
 # Keep a reference to the announcer so it doesn't get GC'd
-announcer = DNSSD::PeerAnnouncer.new(network_port: file_server.port)
+announcer = DNSSD::PeerAnnouncer.new
 
 # Store our own service name to prevent self-discovery
 PeerFinder.set_own_service_name(announcer.service_name)
@@ -301,36 +302,16 @@ loop do
       puts "❓ No pending file transfer requests."
     end
   when "1"
-    puts "Starting peer discovery from menu..."
-    puts "---------------------------------------------------"
-    puts "📡 Performing thorough peer discovery..."
-    
-    # First run the debug command which might uncover some clients
-    puts "DEBUG: Checking for clients with debug mode..."
-    peers_debug = PeerFinder.debug_mdns_response(2)
-    
-    # Try direct discovery multiple times to handle timing issues
-    all_peers = {}
-    3.times do |i|
-      puts "\nDEBUG: Discovery attempt #{i+1}..."
-      peers = PeerFinder.discover_peers(4)  # Shorter but multiple attempts
-      peers.each do |peer|
-        all_peers[peer[:name]] = peer
-      end
-      # Short pause between attempts
-      sleep 0.5
-    end
-    
-    # Display the final combined list
-    if all_peers.empty?
-      puts "\n⚠️  No peers found after thorough search."
+    peers = PeerFinder.discover_peers(5)
+    if peers.empty?
+      puts "\n⚠️  No peers found."
     else
-      puts "\n🔎 Discovered peers (combined results):"
-      all_peers.values.each_with_index do |peer, i|
+      puts "\n🔎 Discovered peers:"
+      peers.each_with_index do |peer, i|
         puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
       end
     end
-    puts "---------------------------------------------------"
+
   when "2"
     peers = PeerFinder.discover_peers(5)
     if peers.empty?
