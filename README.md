@@ -8,7 +8,7 @@ Basic usage:
 6. Upon first startup, you need to create an identity, this shares a username and ECDSA public key which the other client will keep track of in the future.
 (Ensure who you think is sending the first file request is actually them by contacting them outside of the P2P module, as it uses Trust on First Use.)
 7. Once you create an identity, you can send a file request which will save you as a contact.
-
+8. Only the Python client supports multiple same-language clients, and Ruby will error out if another Ruby process is running.
 
 Criteria Satisfaction:
 1. Peer Discovery
