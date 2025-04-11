@@ -12,7 +12,10 @@ module PeerFinder
   
   def self.set_own_service_name(service_name)
     @@own_service_name = service_name
+    # Extract the hostname part (peer-XXXXX) for easier comparison
+    @@own_hostname = service_name.split("._peer._tcp.local.")[0] if service_name
     puts "Setting own service name: #{@@own_service_name}"
+    puts "Own hostname identifier: #{@@own_hostname}"
   end
 
   def self.discover_peers(timeout = 10)
@@ -52,9 +55,12 @@ module PeerFinder
         service_names.each do |name|
           next if discovered_peers[name]
           
-          # Skip if this is our own service
-          if @@own_service_name && name == @@own_service_name
-            puts "Skipping own service: #{name}"
+          # Extract hostname part for comparison
+          hostname = name.split("._peer._tcp.local.")[0]
+          
+          # Skip if this is our own service based on hostname part
+          if @@own_hostname && hostname == @@own_hostname
+            puts "Skipping own service with hostname: #{hostname}"
             next
           end
 
