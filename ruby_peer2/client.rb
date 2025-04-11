@@ -66,8 +66,6 @@ def request_file(ip, port, filename, session_key, original_peer_name=nil)
             return
           end
           puts "⚠️ Proceeding with unverified file..."
-        else
-          puts "✅ File hash verified successfully."
         end
       end
       
@@ -217,7 +215,6 @@ def save_peer_file_list(peer_name, file_list)
   # Save updated data
   begin
     File.write(file_path, JSON.pretty_generate(peers_data))
-    puts "✅ Successfully saved peer file list to #{file_path}"
   rescue Errno::EACCES
     puts "❌ Permission denied when writing to #{file_path}"
   rescue => e

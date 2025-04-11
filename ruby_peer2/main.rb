@@ -342,8 +342,24 @@ loop do
         # 🧠 Perform identity authentication
         if identity.send_authentication(selected_peer[:ip], selected_peer[:port], session_key)
           puts "Authentication successful."
-          # Get file list first to store hashes
-          request_file_list(selected_peer[:ip], selected_peer[:port], selected_peer[:name])
+          # Check if we already have the file list with hashes for this peer
+          current_dir = Dir.pwd
+          file_path = File.join(current_dir, 'known_peers.json')
+          
+          if File.exist?(file_path)
+            peers_data = JSON.parse(File.read(file_path))
+            if peers_data.key?(selected_peer[:name]) && 
+               peers_data[selected_peer[:name]].is_a?(Hash) && 
+               peers_data[selected_peer[:name]].key?("files")
+              puts "✅ Using cached file list with hashes for #{selected_peer[:name]}"
+            else
+              puts "📥 Fetching fresh file list with hashes..."
+              request_file_list(selected_peer[:ip], selected_peer[:port], selected_peer[:name])
+            end
+          else
+            puts "📥 Fetching file list with hashes for the first time..."
+            request_file_list(selected_peer[:ip], selected_peer[:port], selected_peer[:name])
+          end
           # ✅ Proceed with file request only if authenticated
           request_file(selected_peer[:ip], selected_peer[:port], filename, session_key, selected_peer[:name])
         else
