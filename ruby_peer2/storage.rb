@@ -242,11 +242,15 @@ class SecureStorage
         return nil
       end
       
+      # Rename to the correct filename (without temp_ prefix)
+      final_path = File.join(@storage_dir, "#{filename}.enc")
+      File.rename(encrypted_path, final_path)
+      
       # Remove the temporary file
       File.delete(temp_path) if File.exist?(temp_path)
       
       # Return path to encrypted file
-      encrypted_path
+      final_path
     rescue => e
       puts "Error in store_encrypted_file: #{e.message}"
       puts "Error backtrace: #{e.backtrace.first}"
