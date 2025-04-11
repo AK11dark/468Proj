@@ -132,16 +132,25 @@ class FileServer:
                 'response': None  # Will be set by the main thread
             }
             
-            # Add to queue and set event
+            # Clear any existing event flag first to avoid race conditions
+            has_pending_request.clear()
+            
+            # Ensure queue is empty before adding a new request
+            while not pending_requests.empty():
+                try:
+                    pending_requests.get_nowait()
+                except queue.Empty:
+                    break
+            
+            # Now add our request and set the event
             pending_requests.put(req_info)
             has_pending_request.set()
-            print(f"[DEBUG] Added file request for '{file_name}' to queue. Waiting for response...")
+            print(f"Waiting for user confirmation to transfer '{file_name}'...")
             
             # Wait for response with timeout
             start_time = time.time()
             while time.time() - start_time < 60:  # 60 second timeout
                 if req_info['response'] is not None:
-                    print(f"[DEBUG] Received response: {req_info['response']}")
                     break
                 time.sleep(0.1)
             
@@ -209,16 +218,25 @@ class FileServer:
                     'response': None  # Will be set by the main thread
                 }
                 
-                # Add to queue and set event
+                # Clear any existing event flag first to avoid race conditions
+                has_pending_request.clear()
+                
+                # Ensure queue is empty before adding a new request
+                while not pending_requests.empty():
+                    try:
+                        pending_requests.get_nowait()
+                    except queue.Empty:
+                        break
+                
+                # Now add our request and set the event
                 pending_requests.put(req_info)
                 has_pending_request.set()
-                print(f"[DEBUG] Added encrypted file request for '{file_name}' to queue. Waiting for response...")
+                print(f"Waiting for user confirmation to transfer encrypted '{file_name}'...")
                 
                 # Wait for response with timeout
                 start_time = time.time()
                 while time.time() - start_time < 60:  # 60 second timeout
                     if req_info['response'] is not None:
-                        print(f"[DEBUG] Received response: {req_info['response']}")
                         break
                     time.sleep(0.1)
                 

@@ -404,31 +404,32 @@ def handle_find_alternative_source():
 def check_pending_requests():
     """Check if there are any pending file requests that need approval"""
     if has_pending_request.is_set():
-        print("[DEBUG] Pending request detected")
         try:
             # Get the request without removing it from the queue
+            if pending_requests.empty():
+                # Event set but queue empty (race condition)
+                has_pending_request.clear()
+                return False
+            
             req = pending_requests.queue[0]
             
             if req['type'] == 'file_request':
                 print(f"\n⚠️ Allow transfer of '{req['file_name']}'? (y/n): ", end='', flush=True)
                 response = input().strip().lower()
                 req['response'] = response
-                print(f"[DEBUG] Set response to '{response}' for file request: {req['file_name']}")
                 
             elif req['type'] == 'encrypted_file_request':
                 print(f"\n⚠️ Allow transfer of encrypted '{req['file_name']}'? (y/n): ", end='', flush=True)
                 response = input().strip().lower()
                 req['response'] = response
-                print(f"[DEBUG] Set response to '{response}' for encrypted file request: {req['file_name']}")
                 
             # After handling, remove from queue and reset event if queue is empty
             pending_requests.get()
             if pending_requests.empty():
                 has_pending_request.clear()
-                print("[DEBUG] Queue is now empty, cleared flag")
             
             # Small delay to let the file server thread process the response
-            time.sleep(0.1)
+            time.sleep(0.2)  # Increased delay slightly
             return True
         except (IndexError, KeyError) as e:
             # Queue might be empty now or other error
@@ -466,10 +467,16 @@ def main():
     else:
         print("File server already running. Continuing with client mode only.")
 
+    # Variable to track if we're expecting a confirmation response
+    waiting_for_confirmation = False
+
     while True:
-        # Check for pending requests first
-        if check_pending_requests():
-            # If we processed a request, skip showing the menu this loop
+        # Always check for pending requests before showing the menu
+        if has_pending_request.is_set():
+            waiting_for_confirmation = True
+            check_pending_requests()
+            waiting_for_confirmation = False
+            # Skip showing the menu this loop if we processed a request
             continue
             
         print("\nMenu:")
@@ -483,6 +490,28 @@ def main():
         print("0. Exit")
 
         choice = input("Enter choice: ")
+
+        # Check again for any pending requests that might have come in while waiting for input
+        if has_pending_request.is_set():
+            # Save the choice for later
+            saved_choice = choice
+            # Mark that we're waiting for confirmation
+            waiting_for_confirmation = True
+            # Handle the request
+            check_pending_requests()
+            waiting_for_confirmation = False
+            # Now process the saved choice if it wasn't just a confirmation response
+            if saved_choice not in ['y', 'n']:
+                choice = saved_choice
+            else:
+                # Skip processing the choice if it was a y/n response
+                continue
+
+        # If the user entered 'y' or 'n' and we weren't expecting confirmation,
+        # it's likely a response to a recently completed file request
+        if choice in ['y', 'n'] and not waiting_for_confirmation:
+            # Just ignore it and show the menu again
+            continue
 
         if choice == "1":
             handle_find_peers()
