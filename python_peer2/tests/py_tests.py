@@ -4,9 +4,15 @@ import traceback
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from client import perform_key_exchange_with_ruby, request_file
+from client import perform_key_exchange_with_ruby, request_file, request_file_list
 from identity import sign_session_key, send_identity_to_ruby
 from discover import discover_peers
+from encryption_utils import encrypt_file
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from advertise import advertise_service, stop_advertisement
+from auth_handler import save_known_peer, load_known_peers
+from file_server import FileServer
+from storage import SecureStorage
 
 
 def get_ruby_peer():
@@ -71,7 +77,6 @@ def test_file_list_request():
         return False
 
     try:
-        from client import request_file_list
         files = request_file_list(peer["ip"], peer["port"])
         print("Files shared by peer:", files)
         return isinstance(files, list)
@@ -100,9 +105,7 @@ def test_request_nonexistent_file():
 
 def test_tampered_file():
     print("🧨 Testing decryption failure from tampered file")
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from encryption_utils import encrypt_file
-
+    
     peer = get_ruby_peer()
     if not peer:
         return False
@@ -146,7 +149,6 @@ def test_forward_secrecy():
 def test_advertise_service():
     print("📢 Testing service advertisement")
     try:
-        from advertise import advertise_service, stop_advertisement
         name = advertise_service(name="test-peer", port=6000)
         assert name.startswith("test-peer")
         stop_advertisement()
@@ -159,8 +161,6 @@ def test_advertise_service():
 def test_known_peers_storage():
     print("🔒 Testing known peer storage and loading")
     try:
-        import os
-        from auth_handler import save_known_peer, load_known_peers
         test_key = "-----BEGIN PUBLIC KEY-----\nFAKEKEY\n-----END PUBLIC KEY-----"
         save_known_peer("testuser", test_key)
         peers = load_known_peers()
@@ -174,8 +174,6 @@ def test_known_peers_storage():
 def test_file_server_hash_calc():
     print("🧮 Testing file hash calculation")
     try:
-        import os
-        from file_server import FileServer
         test_path = "/tmp/testfile.txt"
         with open(test_path, "w") as f:
             f.write("test content")
@@ -192,8 +190,6 @@ def test_file_server_hash_calc():
 def test_storage_encryption_decryption():
     print("📁 Testing file storage encryption and decryption")
     try:
-        from storage import SecureStorage
-        import os
         content = b"secret test data"
         filename = "test_secret.txt"
         password = "strongpass"

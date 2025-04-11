@@ -413,20 +413,14 @@ def check_pending_requests():
             
             req = pending_requests.queue[0]
             
-            # Make the prompt very visible
-            print("\n" + "=" * 60)
-            print("🚨 FILE TRANSFER CONFIRMATION REQUIRED 🚨")
-            
             if req['type'] == 'file_request':
-                print(f"⚠️ Allow transfer of '{req['file_name']}'?")
-                print("=" * 60)
-                response = input("Enter y/n: ").strip().lower()
+                print(f"\n⚠️ Allow transfer of '{req['file_name']}'? (y/n): ", end='', flush=True)
+                response = input().strip().lower()
                 req['response'] = response
                 
             elif req['type'] == 'encrypted_file_request':
-                print(f"⚠️ Allow transfer of encrypted '{req['file_name']}'?")
-                print("=" * 60)
-                response = input("Enter y/n: ").strip().lower()
+                print(f"\n⚠️ Allow transfer of encrypted '{req['file_name']}'? (y/n): ", end='', flush=True)
+                response = input().strip().lower()
                 req['response'] = response
                 
             # After handling, remove from queue and reset event if queue is empty
@@ -456,37 +450,6 @@ def start_file_server_thread():
     print("🌐 File server started in background thread")
     return server_thread
 
-def non_blocking_input(prompt, timeout=0.2):
-    """A non-blocking input function that periodically checks for pending requests"""
-    print(prompt, end='', flush=True)
-    input_str = ''
-    while True:
-        # Check for pending requests
-        if has_pending_request.is_set():
-            print('\r\033[K', end='')  # Clear current line
-            return None  # Signal that we should handle the request
-        
-        # Check for input (platform-specific)
-        try:
-            # Windows
-            import msvcrt
-            if msvcrt.kbhit():
-                char = msvcrt.getche().decode()
-                if char == '\r':  # Enter key
-                    print()  # New line after Enter
-                    return input_str
-                input_str += char
-        except ImportError:
-            # Unix-like systems don't have a good non-blocking input,
-            # so we'll just use regular input with a short timeout
-            import select
-            i, o, e = select.select([sys.stdin], [], [], timeout)
-            if i:
-                input_str = sys.stdin.readline().strip()
-                return input_str
-        
-        time.sleep(timeout)
-
 def main():
     print("🔁 Starting P2P Python Client")
     service_name = advertise_service()
@@ -506,35 +469,6 @@ def main():
 
     # Variable to track if we're expecting a confirmation response
     waiting_for_confirmation = False
-    
-    # Create a separate thread to check for pending requests
-    def check_requests_periodically():
-        last_notification_time = 0
-        while True:
-            if has_pending_request.is_set() and not waiting_for_confirmation:
-                current_time = time.time()
-                # Only print the notification every 1 second to avoid flooding
-                if current_time - last_notification_time > 1:
-                    # Clear terminal line and immediately show prompt
-                    print('\r\033[K', end='')  # Clear current line
-                    print("\n" + "=" * 60)
-                    print("🔔 FILE TRANSFER REQUEST DETECTED!")
-                    print("→ Press Enter to show the confirmation prompt...")
-                    print("=" * 60, flush=True)
-                    last_notification_time = current_time
-                    
-                    # Force main thread to break from input if it's waiting for input
-                    try:
-                        import msvcrt
-                        msvcrt.putch(b'\r')  # Simulate Enter key on Windows
-                    except ImportError:
-                        # Not on Windows, can't force break input
-                        pass
-            time.sleep(0.1)  # Check more frequently (100ms)
-    
-    # Start the request checking thread
-    request_check_thread = threading.Thread(target=check_requests_periodically, daemon=True)
-    request_check_thread.start()
 
     while True:
         # Always check for pending requests before showing the menu
@@ -555,43 +489,30 @@ def main():
         print("7. 🌐 Find File from Alternative Source")
         print("0. Exit")
 
-        # Show the prompt but check for pending requests frequently
-        print("Enter choice: ", end='', flush=True)
-        choice = ""
-        while True:
-            # Check for pending requests
-            if has_pending_request.is_set():
-                # Clear the current line and break to handle the request
-                print("\r\033[K", end='', flush=True)
-                break
-                
-            # Try to read a character (platform-specific)
-            try:
-                # Windows
-                import msvcrt
-                if msvcrt.kbhit():
-                    char = msvcrt.getch().decode()
-                    if char == '\r':  # Enter key
-                        print()  # New line after Enter
-                        break
-                    print(char, end='', flush=True)  # Echo the character
-                    choice += char
-            except (ImportError, UnicodeDecodeError):
-                # Unix-like systems or decode error
-                # Fall back to regular input
-                choice = input()
-                break
-                
-            time.sleep(0.1)  # Short sleep to prevent CPU hogging
-        
-        # If we broke out of the loop due to a pending request, handle it
+        choice = input("Enter choice: ")
+
+        # Check again for any pending requests that might have come in while waiting for input
         if has_pending_request.is_set():
+            # Save the choice for later
+            saved_choice = choice
+            # Mark that we're waiting for confirmation
             waiting_for_confirmation = True
+            # Handle the request
             check_pending_requests()
             waiting_for_confirmation = False
+            # Now process the saved choice if it wasn't just a confirmation response
+            if saved_choice not in ['y', 'n']:
+                choice = saved_choice
+            else:
+                # Skip processing the choice if it was a y/n response
+                continue
+
+        # If the user entered 'y' or 'n' and we weren't expecting confirmation,
+        # it's likely a response to a recently completed file request
+        if choice in ['y', 'n'] and not waiting_for_confirmation:
+            # Just ignore it and show the menu again
             continue
-        
-        # Process the choice as usual
+
         if choice == "1":
             handle_find_peers()
         elif choice == "2":
