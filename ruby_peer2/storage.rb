@@ -60,17 +60,26 @@ def encrypt_file_with_password(file_path, password)
   }
   
   # Write the metadata and ciphertext to the encrypted file
-  File.open(encrypted_path, 'wb') do |f|
-    # Write metadata as JSON
-    metadata_bytes = JSON.generate(metadata).encode('utf-8')
-    f.write([metadata_bytes.bytesize].pack('N'))
-    f.write(metadata_bytes)
-    # Write the ciphertext
-    f.write(ciphertext)
+  begin
+    File.open(encrypted_path, 'wb') do |f|
+      # Write metadata as JSON
+      metadata_bytes = JSON.generate(metadata).encode('utf-8')
+      f.write([metadata_bytes.bytesize].pack('N'))
+      f.write(metadata_bytes)
+      # Write the ciphertext
+      f.write(ciphertext)
+    end
+    
+    puts "Debug: Encrypted file created at #{encrypted_path}"
+    puts "Debug: File size: #{File.size(encrypted_path)}"
+    
+    # Return the path of the encrypted file
+    encrypted_path
+  rescue => e
+    puts "Encryption failed: #{e.message}"
+    puts "Error occurred at: #{e.backtrace.first}"
+    nil
   end
-  
-  # Return the path of the encrypted file
-  encrypted_path
 end
 
 # Decrypt file using AES-GCM
@@ -78,26 +87,42 @@ def decrypt_file_with_password(encrypted_path, password, output_path = nil)
   # If output path is not specified, use the original filename without .enc
   output_path ||= encrypted_path.sub(/\.enc$/, '')
   
-  # Read the encrypted file
-  File.open(encrypted_path, 'rb') do |f|
-    # Read metadata length
-    metadata_len = f.read(4).unpack1('N')
-    # Read metadata
-    metadata_bytes = f.read(metadata_len)
-    metadata = JSON.parse(metadata_bytes)
-    
-    # Read the ciphertext
-    ciphertext = f.read
-    
-    # Get metadata values
-    salt = [metadata['salt']].pack('H*')
-    iv = [metadata['iv']].pack('H*')
-    tag = [metadata['tag']].pack('H*')
-    
-    # Derive key from password and salt
-    key, _ = derive_key_from_password(password, salt)
-    
-    begin
+  begin
+    # Read the encrypted file
+    File.open(encrypted_path, 'rb') do |f|
+      # Read metadata length
+      metadata_len_bytes = f.read(4)
+      if metadata_len_bytes.nil? || metadata_len_bytes.length < 4
+        puts "Error: Failed to read metadata length. File may be corrupted or empty."
+        return nil
+      end
+
+      metadata_len = metadata_len_bytes.unpack1('N')
+      
+      # Read metadata
+      metadata_bytes = f.read(metadata_len)
+      if metadata_bytes.nil? || metadata_bytes.length < metadata_len
+        puts "Error: Failed to read metadata. File may be corrupted."
+        return nil
+      end
+      
+      metadata = JSON.parse(metadata_bytes)
+      
+      # Read the ciphertext
+      ciphertext = f.read
+      if ciphertext.nil? || ciphertext.empty?
+        puts "Error: No ciphertext found. File may be corrupted."
+        return nil
+      end
+      
+      # Get metadata values
+      salt = [metadata['salt']].pack('H*')
+      iv = [metadata['iv']].pack('H*')
+      tag = [metadata['tag']].pack('H*')
+      
+      # Derive key from password and salt
+      key, _ = derive_key_from_password(password, salt)
+      
       # Create the cipher for decryption
       cipher = OpenSSL::Cipher.new('aes-256-gcm')
       cipher.decrypt
@@ -112,10 +137,14 @@ def decrypt_file_with_password(encrypted_path, password, output_path = nil)
       File.binwrite(output_path, plaintext)
       
       return output_path
-    rescue => e
-      puts "Decryption failed: #{e.message}"
-      return nil
     end
+  rescue OpenSSL::Cipher::CipherError => e
+    puts "Decryption cipher error: #{e.message}"
+    return nil
+  rescue => e
+    puts "Decryption failed: #{e.message}"
+    puts "Error occurred at: #{e.backtrace.first}"
+    return nil
   end
 end
 
@@ -125,13 +154,29 @@ def get_file_content_with_password(encrypted_path, password)
     # Read the encrypted file
     File.open(encrypted_path, 'rb') do |f|
       # Read metadata length
-      metadata_len = f.read(4).unpack1('N')
+      metadata_len_bytes = f.read(4)
+      if metadata_len_bytes.nil? || metadata_len_bytes.length < 4
+        puts "Error: Failed to read metadata length. File may be corrupted or empty."
+        return nil
+      end
+
+      metadata_len = metadata_len_bytes.unpack1('N')
+      
       # Read metadata
       metadata_bytes = f.read(metadata_len)
+      if metadata_bytes.nil? || metadata_bytes.length < metadata_len
+        puts "Error: Failed to read metadata. File may be corrupted."
+        return nil
+      end
+      
       metadata = JSON.parse(metadata_bytes)
       
       # Read the ciphertext
       ciphertext = f.read
+      if ciphertext.nil? || ciphertext.empty?
+        puts "Error: No ciphertext found. File may be corrupted."
+        return nil
+      end
       
       # Get metadata values
       salt = [metadata['salt']].pack('H*')
@@ -153,8 +198,12 @@ def get_file_content_with_password(encrypted_path, password)
       
       return plaintext
     end
+  rescue OpenSSL::Cipher::CipherError => e
+    puts "Decryption cipher error: #{e.message}"
+    return nil
   rescue => e
     puts "Decryption failed: #{e.message}"
+    puts "Error occurred at: #{e.backtrace.first}"
     return nil
   end
 end
@@ -171,16 +220,40 @@ class SecureStorage
     temp_path = File.join(@storage_dir, "temp_" + filename)
     
     # Write content to temporary file
-    File.binwrite(temp_path, file_content)
-    
-    # Encrypt the file
-    encrypted_path = encrypt_file_with_password(temp_path, password)
-    
-    # Remove the temporary file
-    File.delete(temp_path)
-    
-    # Return path to encrypted file
-    encrypted_path
+    begin
+      # Ensure directory exists
+      FileUtils.mkdir_p(@storage_dir) unless Dir.exist?(@storage_dir)
+      
+      # Write content to temporary file
+      File.binwrite(temp_path, file_content)
+      
+      # Encrypt the file
+      encrypted_path = encrypt_file_with_password(temp_path, password)
+      
+      # Check if encryption succeeded
+      if encrypted_path.nil?
+        puts "Encryption failed for #{filename}"
+        return nil
+      end
+      
+      # Verify encrypted file exists
+      unless File.exist?(encrypted_path)
+        puts "Encrypted file not created at expected path: #{encrypted_path}"
+        return nil
+      end
+      
+      # Remove the temporary file
+      File.delete(temp_path) if File.exist?(temp_path)
+      
+      # Return path to encrypted file
+      encrypted_path
+    rescue => e
+      puts "Error in store_encrypted_file: #{e.message}"
+      puts "Error backtrace: #{e.backtrace.first}"
+      # Clean up temporary file if it exists
+      File.delete(temp_path) if File.exist?(temp_path)
+      nil
+    end
   end
   
   def get_decrypted_file(filename, password, output_path = nil)
@@ -207,13 +280,22 @@ class SecureStorage
       return nil
     end
     
-    # Get file content
-    get_file_content_with_password(encrypted_path, password)
+    # Get file content with proper error handling
+    begin
+      content = get_file_content_with_password(encrypted_path, password)
+      if content.nil?
+        puts "Failed to decrypt file content"
+      end
+      return content
+    rescue => e
+      puts "Error reading file content: #{e.message}"
+      return nil
+    end
   end
   
   def list_encrypted_files
     # List all encrypted files in storage directory
-    Dir.entries(@storage_dir).select { |f| f.end_with?('.enc') }
+    Dir.glob(File.join(@storage_dir, "*.enc")).map { |f| File.basename(f) }
   end
   
   def list_all_files

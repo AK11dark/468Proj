@@ -71,7 +71,7 @@ class PeerIdentity
     {
       username: @username,
       public_key: public_key_pem,
-      signature: sign_username
+      signature: Base64.strict_encode64(sign_username)
     }.to_json
   end
 

@@ -91,29 +91,36 @@ class StorageTest < Minitest::Test
     encrypted_path = @storage.store_encrypted_file(content, filename, @test_password)
     
     # Verify file is stored with encryption
-    assert File.exist?(encrypted_path)
-    assert encrypted_path.end_with?(".enc")
+    assert File.exist?(encrypted_path), "Encrypted file should exist at #{encrypted_path}"
+    assert encrypted_path.end_with?(".enc"), "Encrypted file path should end with .enc"
     
-    # Test retrieving file content
+    # List encrypted files to ensure it's in the storage directory
+    encrypted_files = @storage.list_encrypted_files
+    assert_includes encrypted_files, "#{filename}.enc", "Encrypted file should be in the list of encrypted files"
+    
+    # Test retrieving file content - with detailed error info
     retrieved_content = @storage.get_file_content(filename, @test_password)
-    assert_equal content, retrieved_content
+    if retrieved_content.nil?
+      # Debug output if content retrieval fails
+      puts "DEBUG: File exists? #{File.exist?(encrypted_path)}"
+      puts "DEBUG: File size: #{File.size(encrypted_path) rescue 'unknown'}"
+      puts "DEBUG: Encrypted path: #{encrypted_path}"
+      puts "DEBUG: Files in directory: #{Dir.entries(@test_dir).join(', ')}"
+    end
+    assert_equal content, retrieved_content, "Retrieved content should match original content"
     
     # Test retrieving file to disk
     output_path = File.join(@test_dir, "retrieved_#{filename}")
     retrieved_path = @storage.get_decrypted_file(filename, @test_password, output_path)
-    assert_equal output_path, retrieved_path
-    assert File.exist?(output_path)
-    assert_equal content, File.read(output_path)
-    
-    # Test listing encrypted files
-    encrypted_files = @storage.list_encrypted_files
-    assert_includes encrypted_files, "#{filename}.enc"
+    assert_equal output_path, retrieved_path, "Retrieved path should match output path"
+    assert File.exist?(output_path), "Decrypted file should exist"
+    assert_equal content, File.read(output_path), "Decrypted content should match original"
     
     # Test listing all files
     all_files = @storage.list_all_files
     file_found = all_files.find { |f| f["filename"] == "#{filename}.enc" }
-    assert file_found
-    assert_equal filename, file_found["original_name"]
-    assert file_found["encrypted"]
+    assert file_found, "Encrypted file should be in list_all_files result"
+    assert_equal filename, file_found["original_name"], "Original name should match filename"
+    assert file_found["encrypted"], "File should be marked as encrypted"
   end
 end 

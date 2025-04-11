@@ -79,10 +79,10 @@ class PeerIdentityTest < Minitest::Test
     assert data["public_key"].start_with?("-----BEGIN PUBLIC KEY-----")
     assert data["signature"], "Signature should be present"
     
-    # Verify signature is valid
+    # Verify signature is valid (now base64 encoded)
     pub_key = OpenSSL::PKey::EC.new(data["public_key"])
     username_bytes = "payload_user"
-    signature = data["signature"]
+    signature = Base64.strict_decode64(data["signature"])
     
     # Test signature verification indirectly
     assert @identity.key.dsa_verify_asn1(
