@@ -1,6 +1,7 @@
 require "socket"
 require "resolv"
 require "securerandom"
+require "ipaddr"
 
 module DNSSD
   MDNS_PORT = 5353
@@ -30,7 +31,22 @@ module DNSSD
     def start
       @running = true
       @socket = UDPSocket.new
+      
+      # Improved multicast socket configuration
       @socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
+      
+      # Set TTL for multicast packets (4 is a good default for local network)
+      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 4)
+      
+      # Enable loopback to receive our own multicasts
+      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_LOOP, 1)
+      
+      # Set outgoing interface for multicast packets
+      # This helps with multi-interface systems
+      interface_addr = IPAddr.new(@ip).hton
+      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_IF, interface_addr)
+      
+      puts "[Advertiser] Configured multicast socket with TTL=4, IF=#{@ip}"
 
       Thread.new do
         announce_loop
@@ -81,11 +97,28 @@ module DNSSD
     end
 
     def local_ip
-      udp = UDPSocket.new
-      udp.connect("8.8.8.8", 1)
-      ip = udp.addr.last
-      udp.close
-      ip
+      # Try primary method first
+      begin
+        udp = UDPSocket.new
+        udp.connect("8.8.8.8", 1)
+        ip = udp.addr.last
+        udp.close
+        return ip
+      rescue
+        puts "[Advertiser] Warning: Failed to detect IP via primary method, using fallback..."
+      end
+
+      # Fallback method - try to find a non-loopback IPv4 address
+      begin
+        Socket.ip_address_list.each do |addr|
+          next if addr.ipv4_loopback? || !addr.ipv4?
+          return addr.ip_address
+        end
+      rescue
+        # If all else fails, use localhost
+        puts "[Advertiser] Warning: Failed to detect IP via fallback, defaulting to 127.0.0.1"
+        return "127.0.0.1"
+      end
     end
   end
 end

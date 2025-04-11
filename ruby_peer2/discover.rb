@@ -1,5 +1,6 @@
 require "socket"
 require "resolv"
+require 'ipaddr'
 
 module PeerFinder
   MDNS_PORT = 5353
@@ -19,6 +20,26 @@ module PeerFinder
     discovered_peers = {}
 
     begin
+      # Configure socket for multicast traffic
+      socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
+      
+      # For Windows compatibility
+      if RUBY_PLATFORM =~ /mswin|mingw|cygwin/
+        socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 4)
+      else
+        socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 4)
+        socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_LOOP, 1)
+      end
+      
+      # Bind to multicast port
+      socket.bind('0.0.0.0', MDNS_PORT)
+      
+      # Join multicast group
+      ip_mreq = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
+      socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, ip_mreq)
+      
+      puts "🔍 Joined multicast group #{MDNS_ADDR}:#{MDNS_PORT} for discovery"
+
       # Send PTR query
       query = Resolv::DNS::Message.new(0)
       query.add_question(SERVICE_TYPE, Resolv::DNS::Resource::IN::PTR)
@@ -56,6 +77,13 @@ module PeerFinder
         end
       end
     ensure
+      # Leave multicast group before closing
+      begin
+        ip_mreq = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
+        socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_DROP_MEMBERSHIP, ip_mreq)
+      rescue
+        # Ignore errors when leaving multicast group
+      end
       socket.close
     end
 
