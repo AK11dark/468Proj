@@ -76,17 +76,57 @@ module DNSSD
 
     def announce_loop
       msg = build_mdns_response
+      
+      # Send an immediate announcement when we start
+      send_announcement(msg)
+      
+      # Then enter the regular loop
       while @running
         begin
           # Send using both the original and enhanced sockets for maximum compatibility
-          @socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
-          @enhanced_socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
-          sleep 5
+          send_announcement(msg)
+          sleep 2  # More frequent announcements (was 5 seconds)
         rescue => e
           puts "[Advertiser] Error: #{e.message}"
-          sleep 5
+          sleep 2
         end
       end
+    end
+    
+    def send_announcement(msg)
+      @socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
+      @enhanced_socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
+      
+      # Also send a "goodbye" and "hello" sequence to trigger responses from other peers
+      # This is a common technique to force peer refresh
+      if rand(5) == 0  # Only do this occasionally to avoid flooding
+        puts "[Advertiser] Sending hello/goodbye sequence to refresh peers..."
+        begin
+          # Build a temporary goodbye message
+          goodbye = build_goodbye_message
+          @enhanced_socket.send(goodbye, 0, MDNS_ADDR, MDNS_PORT)
+          sleep 0.1
+          # Then immediately send hello again
+          @enhanced_socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
+        rescue => e
+          puts "[Advertiser] Error in hello/goodbye sequence: #{e.message}"
+        end
+      end
+    end
+    
+    def build_goodbye_message
+      msg = Resolv::DNS::Message.new
+      msg.qr = 1  # response
+      msg.aa = 1  # authoritative
+      
+      ptr = Resolv::DNS::Name.create("_peer._tcp.local.")
+      srv = Resolv::DNS::Name.create(@service_name)
+      
+      # Add a TTL=0 record which signals the peer is going away
+      # This can trigger peer refresh mechanisms
+      msg.add_answer(ptr, 0, Resolv::DNS::Resource::IN::PTR.new(srv))
+      
+      msg.encode
     end
 
     def build_mdns_response

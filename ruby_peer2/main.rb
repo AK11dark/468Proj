@@ -302,21 +302,35 @@ loop do
     end
   when "1"
     puts "Starting peer discovery from menu..."
-    # Add specific debugging for Python client detection
-    puts "DEBUG: First trying direct debug to verify Python client visibility..."
-    # Try a direct debug call to see what's visible
-    peers_debug = PeerFinder.debug_mdns_response(3)
+    puts "---------------------------------------------------"
+    puts "📡 Performing thorough peer discovery..."
     
-    puts "DEBUG: Now calling regular discover_peers..."
-    peers = PeerFinder.discover_peers(10)  # Increase timeout
-    if peers.empty?
-      puts "\n⚠️  No peers found."
+    # First run the debug command which might uncover some clients
+    puts "DEBUG: Checking for clients with debug mode..."
+    peers_debug = PeerFinder.debug_mdns_response(2)
+    
+    # Try direct discovery multiple times to handle timing issues
+    all_peers = {}
+    3.times do |i|
+      puts "\nDEBUG: Discovery attempt #{i+1}..."
+      peers = PeerFinder.discover_peers(4)  # Shorter but multiple attempts
+      peers.each do |peer|
+        all_peers[peer[:name]] = peer
+      end
+      # Short pause between attempts
+      sleep 0.5
+    end
+    
+    # Display the final combined list
+    if all_peers.empty?
+      puts "\n⚠️  No peers found after thorough search."
     else
-      puts "\n🔎 Discovered peers:"
-      peers.each_with_index do |peer, i|
+      puts "\n🔎 Discovered peers (combined results):"
+      all_peers.values.each_with_index do |peer, i|
         puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
       end
     end
+    puts "---------------------------------------------------"
   when "2"
     peers = PeerFinder.discover_peers(5)
     if peers.empty?

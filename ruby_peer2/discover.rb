@@ -31,6 +31,10 @@ module PeerFinder
       # Send a second query for Python clients specifically
       puts "🔎 Sending second query specifically looking for Python clients..."
       socket.send(query.encode, 0, MDNS_ADDR, MDNS_PORT)
+      
+      # Send a third query specifically looking for Ruby peers
+      puts "🔎 Sending query specifically looking for Ruby peers..."
+      socket.send(query.encode, 0, MDNS_ADDR, MDNS_PORT)
 
       end_time = Time.now + timeout
 
@@ -60,6 +64,17 @@ module PeerFinder
             end
           end
           
+          # SPECIAL CHECK FOR RUBY PEERS
+          ruby_service_name = nil
+          response.answer.each do |name, ttl, record|
+            if record.is_a?(Resolv::DNS::Resource::IN::PTR) && 
+               record.name.to_s.include?("peer-") && 
+               record.name.to_s.include?("._peer._tcp.local")
+              ruby_service_name = record.name.to_s
+              puts "  💎 Detected Ruby peer: #{ruby_service_name}"
+            end
+          end
+          
           # First check for PTR records in the answer section
           service_names = response.answer.select { |name, ttl, record| 
             record.is_a?(Resolv::DNS::Resource::IN::PTR) && 
@@ -82,6 +97,12 @@ module PeerFinder
           if python_service_name && !service_names.include?(python_service_name)
             service_names << python_service_name
             puts "  🐍 Added Python client to service list"
+          end
+          
+          # If we found a Ruby peer via the special check, add it to service_names
+          if ruby_service_name && !service_names.include?(ruby_service_name)
+            service_names << ruby_service_name
+            puts "  💎 Added Ruby peer to service list"
           end
 
           # Extract all A records, TXT records, and SRV records for easier processing
@@ -337,23 +358,47 @@ module PeerFinder
   # Main discovery method that tries both approaches
   def self.discover_peers(timeout = 10)
     puts "Starting peer discovery..."
+    all_peers = {}
     
     # Try enhanced discovery first
     begin
-      peers = discover_peers_enhanced(timeout / 2)
-      if !peers.empty?
-        puts "✅ Enhanced discovery found #{peers.length} peer(s)"
-        return peers
+      enhanced_peers = discover_peers_enhanced(timeout / 2)
+      enhanced_peers.each do |peer|
+        all_peers[peer[:name]] = peer
       end
+      puts "✅ Enhanced discovery found #{enhanced_peers.length} peer(s)"
     rescue => e
       puts "Enhanced discovery failed: #{e.message}"
     end
     
-    # If enhanced discovery fails or finds no peers, fall back to original method
-    puts "Falling back to original discovery method..."
-    peers = discover_peers_original(timeout / 2)
+    # Always run original method as well to find all types of peers
+    puts "Running original discovery method..."
+    original_peers = discover_peers_original(timeout / 2)
+    original_peers.each do |peer|
+      all_peers[peer[:name]] = peer
+    end
+    
+    # Announce our own service to help other Ruby peers find us
+    puts "Sending self-announcement to help other peers find us..."
+    begin
+      # Create a separate socket for announcement
+      announce_socket = UDPSocket.new
+      announce_socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
+      announce_socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 4)
+      
+      # Send our own PTR record to announce our presence
+      # This helps other Ruby peers find us
+      3.times do # Send multiple times to increase chance of reception
+        announce_socket.send(build_announcement_message, 0, MDNS_ADDR, MDNS_PORT)
+        sleep 0.1
+      end
+      announce_socket.close
+    rescue => e
+      puts "Self-announcement failed: #{e.message}"
+    end
     
     # Print once at the end
+    peers = all_peers.values
     if peers.empty?
       puts "❌ No peers found."
     else
@@ -364,6 +409,29 @@ module PeerFinder
     end
     
     peers
+  end
+
+  # Helper method to build a simple announcement message
+  # This sends a basic mDNS response that other Ruby peers can detect
+  def self.build_announcement_message
+    begin
+      # Only build if we have our own name
+      return nil unless @@own_service_name
+      
+      msg = Resolv::DNS::Message.new
+      msg.qr = 1 # This is a response
+      msg.aa = 1 # Authoritative answer
+      
+      # Add a PTR record for our service
+      ptr_name = Resolv::DNS::Name.create(SERVICE_TYPE)
+      our_name = Resolv::DNS::Name.create(@@own_service_name)
+      msg.add_answer(ptr_name, 120, Resolv::DNS::Resource::IN::PTR.new(our_name))
+      
+      msg.encode
+    rescue => e
+      puts "Error building announcement message: #{e.message}"
+      nil
+    end
   end
 
   # Utility method to dump the raw mDNS response for debugging
