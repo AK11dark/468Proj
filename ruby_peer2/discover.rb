@@ -9,13 +9,27 @@ module PeerFinder
   
   # Store our own service name to avoid self-discovery
   @@own_service_name = nil
+  @@own_hostname = nil
+  @@own_ip = nil
+  
+  # Extract just the hostname part (peer-XXXXX) from a service name
+  def self.extract_hostname(service_name)
+    if service_name && service_name.include?('._peer._tcp.local.')
+      service_name.split('._peer._tcp.local.')[0]
+    else
+      service_name
+    end
+  end
   
   def self.set_own_service_name(service_name)
     @@own_service_name = service_name
     # Extract the hostname part (peer-XXXXX) for easier comparison
-    @@own_hostname = service_name.split("._peer._tcp.local.")[0] if service_name
+    @@own_hostname = extract_hostname(service_name)
+    # Also store our own IP address
+    @@own_ip = local_ip
     puts "Setting own service name: #{@@own_service_name}"
     puts "Own hostname identifier: #{@@own_hostname}"
+    puts "Own IP address: #{@@own_ip}"
   end
 
   def self.discover_peers(timeout = 10)
@@ -84,14 +98,11 @@ module PeerFinder
             next if discovered_peers[name]
             
             # Extract hostname part for comparison
-            hostname = name.split("._peer._tcp.local.")[0]
+            hostname = extract_hostname(name)
             
-            # Skip if this is our own service
-            if @@own_hostname && hostname == @@own_hostname
-              puts "⚠️ Skipping own service: #{hostname}"
-              next
-            end
-
+            # Debug output to check hostname comparison
+            puts "🔍 Comparing discovered '#{hostname}' with own '#{@@own_hostname}'"
+            
             # Find IP and port in a simpler way
             ip = nil
             port = nil
@@ -104,6 +115,12 @@ module PeerFinder
                 port = record.port
                 puts "🔌 Found port: #{port} for #{record_name}"
               end
+            end
+
+            # Skip if this peer is actually ourselves
+            if ip && port && is_self?(name, ip, port)
+              puts "⚠️ FILTERING OUT own service: #{hostname} @ #{ip}:#{port}"
+              next
             end
 
             if ip && port
@@ -123,6 +140,18 @@ module PeerFinder
     end
 
     puts "Discovery finished! Found #{discovered_peers.size} peer(s)"
+
+    # Final filtering step - remove any discovered services that are actually us
+    filtered_peers = discovered_peers.reject do |name, peer|
+      is_self = is_self?(name, peer[:ip], peer[:port])
+      puts "🧹 Final check: #{name} - Is self? #{is_self}" if is_self
+      is_self
+    end
+    
+    if filtered_peers.size != discovered_peers.size
+      puts "🔴 Removed own service in final filter step. Before: #{discovered_peers.size}, After: #{filtered_peers.size}"
+      discovered_peers = filtered_peers
+    end
 
     # Return the discovered peers
     discovered_peers.values
@@ -145,6 +174,36 @@ module PeerFinder
     Socket.ip_address_list.detect do |addr|
       addr.ipv4? && !addr.ipv4_loopback? && !addr.ipv4_multicast?
     end&.ip_address || "127.0.0.1"
+  end
+
+  # Determine if a discovered peer is actually ourselves
+  def self.is_self?(name, ip, port)
+    hostname = extract_hostname(name)
+    
+    # Check by hostname
+    if @@own_hostname && hostname == @@own_hostname
+      puts "⛔ Self-match by hostname: #{hostname}"
+      return true
+    end
+    
+    # Check by full service name
+    if @@own_service_name && name == @@own_service_name
+      puts "⛔ Self-match by full service name"
+      return true
+    end
+    
+    # Check by IP address
+    if @@own_ip && ip == @@own_ip
+      puts "⚠️ IP match (#{ip}), checking hostname..."
+      # Only consider it a match if the hostname looks like ours (peer-XXXX)
+      if hostname.start_with?('peer-') && @@own_hostname.start_with?('peer-')
+        puts "⛔ Self-match by IP and hostname pattern"
+        return true
+      end
+    end
+    
+    # Not ourselves
+    return false
   end
 end
 
