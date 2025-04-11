@@ -77,13 +77,6 @@ module PeerFinder
             end
           end
 
-          # Double-check to ensure this isn't our own peer
-          own_ip = local_ip()
-          if ip == own_ip && hostname == @@own_hostname
-            puts "🛑 Filtering own peer by IP and hostname match: #{hostname} @ #{ip}"
-            next
-          end
-
           if ip && port
             discovered_peers[name] = { name: name, ip: ip, port: port }
             puts "Discovered peer: #{name} @ #{ip}:#{port}"
@@ -104,15 +97,10 @@ module PeerFinder
       end
     end
 
-    # Final filter - remove any peers that match our hostname
-    if @@own_hostname
-      discovered_peers.reject! do |name, peer|
-        hostname_match = name.split("._peer._tcp.local.")[0] == @@own_hostname
-        if hostname_match
-          puts "🔴 Removing own service from final results: #{name}"
-        end
-        hostname_match
-      end
+    # Final filter - only remove our exact service name
+    if @@own_service_name && discovered_peers[@@own_service_name]
+      puts "🔴 Removing own service from final results: #{@@own_service_name}"
+      discovered_peers.delete(@@own_service_name)
     end
 
     discovered_peers.values
