@@ -301,7 +301,14 @@ loop do
       puts "❓ No pending file transfer requests."
     end
   when "1"
-    peers = PeerFinder.discover_peers(5)
+    puts "Starting peer discovery from menu..."
+    # Add specific debugging for Python client detection
+    puts "DEBUG: First trying direct debug to verify Python client visibility..."
+    # Try a direct debug call to see what's visible
+    peers_debug = PeerFinder.debug_mdns_response(3)
+    
+    puts "DEBUG: Now calling regular discover_peers..."
+    peers = PeerFinder.discover_peers(10)  # Increase timeout
     if peers.empty?
       puts "\n⚠️  No peers found."
     else
@@ -310,7 +317,6 @@ loop do
         puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
       end
     end
-
   when "2"
     peers = PeerFinder.discover_peers(5)
     if peers.empty?
