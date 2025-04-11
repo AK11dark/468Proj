@@ -275,10 +275,21 @@ def handle_find_alternative_source():
             active_peers_with_file = [info["peer"] for info in all_known_files[filename] if info["active"]]
             inactive_peers_with_file = [info["peer"] for info in all_known_files[filename] if not info["active"]]
             
+            # Get the hash value (they should all be the same for the same file)
+            file_hash = all_known_files[filename][0]["hash"] if all_known_files[filename] else "unknown"
+            hash_display = f"[{file_hash[:8]}...]" # Display shortened hash for readability
+            
             active_status = f"✅ Available from: {', '.join(active_peers_with_file)}" if active_peers_with_file else "❌ No active peers have this file"
             inactive_status = f" (Also known by inactive peers: {', '.join(inactive_peers_with_file)})" if inactive_peers_with_file else ""
             
-            print(f"{i+1}. {filename} - {active_status}{inactive_status}")
+            print(f"{i+1}. {filename} {hash_display} - {active_status}{inactive_status}")
+            
+            # If there are conflicting hashes from different peers, show a warning
+            hash_values = {info["hash"] for info in all_known_files[filename]}
+            if len(hash_values) > 1:
+                print(f"   ⚠️ WARNING: Multiple hash values detected for this file!")
+                for peer_info in all_known_files[filename]:
+                    print(f"   - {peer_info['peer']}: {peer_info['hash'][:16]}...")
         
         # Ask which file to download
         file_idx = int(input("\nWhich file do you want to download? (number): ")) - 1
@@ -308,36 +319,12 @@ def handle_find_alternative_source():
         
         selected_source = active_sources[source_idx]
         selected_peer_name = selected_source["peer"]
+        selected_hash = selected_source["hash"]
+        print(f"\n✅ Selected source: {selected_peer_name}")
+        print(f"📊 File hash: {selected_hash}")
+        
         selected_peer = next(p for p in active_peers if p["name"] == selected_peer_name)
         
-        # Store selected verification peer if needed
-        verification_peer = None
-        
-        # Check if we should verify against another peer's hash
-        all_sources = all_known_files[filename]
-        other_sources = [s for s in all_sources if s["peer"] != selected_peer_name]
-        
-        if other_sources:
-            print("\nWould you like to verify against another peer's hash?")
-            verify = input("Verify against another source? (y/n): ").lower().strip() == 'y'
-            
-            if verify:
-                # Show other sources for verification (including inactive for hash checking)
-                print("\nChoose a source to verify against (active or inactive):")
-                for i, source in enumerate(other_sources):
-                    status = "✅ Active" if source["active"] else "❌ Inactive"
-                    print(f"{i+1}. {source['peer']} ({status}) - Hash: {source['hash']}")
-                
-                try:
-                    verify_idx = int(input("Verification source (number): ")) - 1
-                    if 0 <= verify_idx < len(other_sources):
-                        verification_peer = other_sources[verify_idx]["peer"]
-                        print(f"✅ Will verify download against hash from '{verification_peer}'")
-                    else:
-                        print("❌ Invalid selection, downloading without verification.")
-                except ValueError:
-                    print("❌ Invalid input, downloading without verification.")
-                    
         # Now request the file properly using the standard file request flow
         print(f"\n📥 Downloading '{filename}' from {selected_peer_name}...")
         
@@ -359,31 +346,50 @@ def handle_find_alternative_source():
             other_sources = [s for s in all_sources if s["peer"] != selected_peer_name]
             
             if other_sources:
-                print("\nWould you like to verify against another peer's hash?")
-                verify = input("Verify against another source? (y/n): ").lower().strip() == 'y'
+                print("\nWould you like to verify against another hash? This enhances security.")
+                verify = input("Verify against another source hash? (y/n): ").lower().strip() == 'y'
                 
                 if verify:
                     # Show other sources for verification (including inactive for hash checking)
-                    print("\nChoose a source to verify against (active or inactive):")
+                    print("\nChoose a hash to verify against (active or inactive peers):")
                     for i, source in enumerate(other_sources):
                         status = "✅ Active" if source["active"] else "❌ Inactive"
-                        print(f"{i+1}. {source['peer']} ({status}) - Hash: {source['hash']}")
+                        peer_hash = source["hash"]
+                        # Show if hashes match or differ
+                        hash_status = "🔄 Same hash" if peer_hash == selected_hash else "⚠️ Different hash!"
+                        print(f"{i+1}. {source['peer']} ({status}) - {hash_status}")
+                        print(f"   Hash: {peer_hash}")
                     
                     try:
-                        verify_idx = int(input("Verification source (number): ")) - 1
+                        verify_idx = int(input("\nVerification source (number): ")) - 1
                         if 0 <= verify_idx < len(other_sources):
                             verification_peer = other_sources[verify_idx]["peer"]
-                            print(f"✅ Downloading from '{selected_peer_name}' with verification against '{verification_peer}'")
+                            verification_hash = other_sources[verify_idx]["hash"]
+                            
+                            # Compare hashes explicitly
+                            if verification_hash == selected_hash:
+                                print(f"✅ Hashes MATCH! Downloading with verification.")
+                            else:
+                                print(f"⚠️ WARNING: Hash from {verification_peer} ({verification_hash[:8]}...) differs from source hash ({selected_hash[:8]}...)!")
+                                proceed = input("Do you still want to proceed with this verification source? (y/n): ").lower().strip() == 'y'
+                                if not proceed:
+                                    print("❌ Download canceled.")
+                                    return
+                                print("⚠️ Proceeding with verification against different hash...")
+                                
+                            print(f"🔐 Downloading from '{selected_peer_name}' with verification against hash from '{verification_peer}'")
                             request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, verification_peer)
                         else:
-                            print("❌ Invalid selection, downloading without verification.")
+                            print("❌ Invalid selection, downloading without hash verification.")
                             request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
                     except ValueError:
-                        print("❌ Invalid input, downloading without verification.")
+                        print("❌ Invalid input, downloading without hash verification.")
                         request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
                 else:
+                    print("➡️ Downloading without additional hash verification.")
                     request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
             else:
+                print("ℹ️ No other hashes available for verification. Using source's own hash.")
                 request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
         else:
             print("❌ Error with identification")
