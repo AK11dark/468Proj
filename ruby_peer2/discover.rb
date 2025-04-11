@@ -35,6 +35,7 @@ module PeerFinder
     socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, membership)
     
     discovered_peers = {}
+    puts "👀 Starting peer discovery (looking for #{SERVICE_TYPE})"
 
     begin
       # Send PTR query
@@ -54,9 +55,15 @@ module PeerFinder
         # Get service names
         service_names = response.answer.select { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::PTR) }
                                        .map { |_, _, r| r.name.to_s }
+        
+        if !service_names.empty?
+          puts "📡 Received response with #{service_names.length} services"
+        end
 
         service_names.each do |name|
           next if discovered_peers[name]
+          
+          puts "🔍 Examining service: #{name}"
           
           # Skip if this is our own service
           if @@own_service_name && name == @@own_service_name
@@ -64,8 +71,9 @@ module PeerFinder
             next
           end
           
-          # Also check based on the unique service ID
-          if @@own_service_id && name
+          # Also check based on the unique service ID, but only for Ruby peers (peer-XXXX format)
+          # Python peers have a different format (python-peer) so we shouldn't filter them
+          if @@own_service_id && name && name.start_with?("peer-")
             peer_id_match = name.match(/^(peer-[a-f0-9]+)/)
             if peer_id_match && peer_id_match[1] == @@own_service_id
               puts "Skipping own service by ID match: #{name}"
