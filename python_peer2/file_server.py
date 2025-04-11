@@ -9,7 +9,14 @@ from auth_handler import verify_identity, handle_migration
 from storage import SecureStorage
 from getpass import getpass
 from auth_handler import handle_migration
+import queue
+import threading
+import time
 
+# Global pending request queue
+pending_requests = queue.Queue()
+# Flag to indicate if there's a pending request
+has_pending_request = threading.Event()
 
 class FileServer:
     def __init__(self, host='0.0.0.0', port=5003):
@@ -104,7 +111,6 @@ class FileServer:
         print("[Python] 📤 Sent PEM public key to Ruby peer")
 
     def handle_file_request(self, client_socket, client_address):
-
         data_len = int.from_bytes(client_socket.recv(4), 'big')
         data = client_socket.recv(data_len)
         request = json.loads(data.decode('utf-8'))
@@ -115,19 +121,41 @@ class FileServer:
         file_path = os.path.join("Files", file_name)
         if os.path.exists(file_path):
             print(f"📥 File request from {client_address[0]} for '{file_name}'")
-
-       
-            confirm = input(f"⚠️ Allow transfer of '{file_name}'? (y/n): ").strip().lower()
-     
-
-            if confirm != "y":
+            
+            # Put request in queue and wait for confirmation from main thread
+            req_info = {
+                'type': 'file_request',
+                'file_name': file_name,
+                'file_path': file_path,
+                'client_socket': client_socket,
+                'client_address': client_address,
+                'response': None  # Will be set by the main thread
+            }
+            
+            # Add to queue and set event
+            pending_requests.put(req_info)
+            has_pending_request.set()
+            print(f"[DEBUG] Added file request for '{file_name}' to queue. Waiting for response...")
+            
+            # Wait for response with timeout
+            start_time = time.time()
+            while time.time() - start_time < 60:  # 60 second timeout
+                if req_info['response'] is not None:
+                    print(f"[DEBUG] Received response: {req_info['response']}")
+                    break
+                time.sleep(0.1)
+            
+            # Check response
+            if req_info['response'] is None or req_info['response'].lower() != 'y':
+                # Timed out or rejected
                 response = {"status": "rejected", "message": "User denied file transfer"}
                 client_socket.send(b"F")
                 client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
                 client_socket.send(json.dumps(response).encode('utf-8'))
                 print("❌ File transfer denied.")
                 return
-
+            
+            # User confirmed, continue with file transfer
             # Check if file is encrypted and needs password
             is_encrypted = file_name.endswith('.enc')
             file_content = None
@@ -171,16 +199,40 @@ class FileServer:
             if os.path.exists(encrypted_path):
                 print(f"📥 Encrypted file request from {client_address[0]} for '{file_name}'")
                 
-                confirm = input(f"⚠️ Allow transfer of encrypted '{file_name}'? (y/n): ").strip().lower()
+                # Put request in queue and wait for confirmation from main thread
+                req_info = {
+                    'type': 'encrypted_file_request',
+                    'file_name': file_name,
+                    'encrypted_path': encrypted_path,
+                    'client_socket': client_socket,
+                    'client_address': client_address,
+                    'response': None  # Will be set by the main thread
+                }
                 
-                if confirm != "y":
+                # Add to queue and set event
+                pending_requests.put(req_info)
+                has_pending_request.set()
+                print(f"[DEBUG] Added encrypted file request for '{file_name}' to queue. Waiting for response...")
+                
+                # Wait for response with timeout
+                start_time = time.time()
+                while time.time() - start_time < 60:  # 60 second timeout
+                    if req_info['response'] is not None:
+                        print(f"[DEBUG] Received response: {req_info['response']}")
+                        break
+                    time.sleep(0.1)
+                
+                # Check response
+                if req_info['response'] is None or req_info['response'].lower() != 'y':
+                    # Timed out or rejected
                     response = {"status": "rejected", "message": "User denied file transfer"}
                     client_socket.send(b"F")
                     client_socket.send(len(json.dumps(response).encode('utf-8')).to_bytes(4, 'big'))
                     client_socket.send(json.dumps(response).encode('utf-8'))
                     print("❌ File transfer denied.")
                     return
-                    
+                
+                # User confirmed, continue with file transfer
                 print("🔒 This file is encrypted. Enter the password to decrypt it.")
                 password = getpass("Enter password: ")
                 
@@ -255,7 +307,8 @@ class FileServer:
                 sha256.update(chunk)
         return sha256.finalize().hex()
 
-
+# If run directly, start the server
 if __name__ == "__main__":
+    print("[Python] 📂 Starting file server...")
     server = FileServer()
     server.start()

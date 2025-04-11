@@ -6,6 +6,8 @@ import socket
 import json
 import hashlib
 from getpass import getpass
+import time
+import threading
 
 from advertise import advertise_service, stop_advertisement
 from discover import discover_peers, set_own_service_name
@@ -17,7 +19,7 @@ from client import (
     verify_file_hash
 )
 from identity import sign_session_key, create_identity, send_identity_to_ruby, rotate_public_key, notify_peers_of_rotation, ensure_identity_exists
-from file_server import FileServer
+from file_server import FileServer, pending_requests, has_pending_request
 from storage import SecureStorage
 
 def is_port_in_use(port, host='0.0.0.0'):
@@ -399,6 +401,54 @@ def handle_find_alternative_source():
         import traceback
         traceback.print_exc()
 
+def check_pending_requests():
+    """Check if there are any pending file requests that need approval"""
+    if has_pending_request.is_set():
+        print("[DEBUG] Pending request detected")
+        try:
+            # Get the request without removing it from the queue
+            req = pending_requests.queue[0]
+            
+            if req['type'] == 'file_request':
+                print(f"\n⚠️ Allow transfer of '{req['file_name']}'? (y/n): ", end='', flush=True)
+                response = input().strip().lower()
+                req['response'] = response
+                print(f"[DEBUG] Set response to '{response}' for file request: {req['file_name']}")
+                
+            elif req['type'] == 'encrypted_file_request':
+                print(f"\n⚠️ Allow transfer of encrypted '{req['file_name']}'? (y/n): ", end='', flush=True)
+                response = input().strip().lower()
+                req['response'] = response
+                print(f"[DEBUG] Set response to '{response}' for encrypted file request: {req['file_name']}")
+                
+            # After handling, remove from queue and reset event if queue is empty
+            pending_requests.get()
+            if pending_requests.empty():
+                has_pending_request.clear()
+                print("[DEBUG] Queue is now empty, cleared flag")
+            
+            # Small delay to let the file server thread process the response
+            time.sleep(0.1)
+            return True
+        except (IndexError, KeyError) as e:
+            # Queue might be empty now or other error
+            if pending_requests.empty():
+                has_pending_request.clear()
+            print(f"Error processing request: {e}")
+            return False
+    return False
+
+def start_file_server_thread():
+    """Start the file server in a background thread"""
+    def run_server():
+        server = FileServer()
+        server.start()
+    
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    print("🌐 File server started in background thread")
+    return server_thread
+
 def main():
     print("🔁 Starting P2P Python Client")
     service_name = advertise_service()
@@ -409,14 +459,19 @@ def main():
     # Initialize known_peers.json file
     ensure_known_peers_file_exists()
     
-    # Start the file server if it's not already running
+    # Start the file server in a background thread if it's not already running
     if not is_port_in_use(5003):
         print("Starting file server...")
-        subprocess.Popen([sys.executable, "file_server.py"])
+        server_thread = start_file_server_thread()
     else:
         print("File server already running. Continuing with client mode only.")
 
     while True:
+        # Check for pending requests first
+        if check_pending_requests():
+            # If we processed a request, skip showing the menu this loop
+            continue
+            
         print("\nMenu:")
         print("1. Find peers")
         print("2. Request File")
