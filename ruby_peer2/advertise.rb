@@ -15,7 +15,7 @@ module DNSSD
       @network_port = network_port
       @service_name = "peer-#{SecureRandom.hex(4)}._peer._tcp.local."
       @hostname = @service_name.split("._peer._tcp.local.")[0]
-      @ip = local_ip
+      @ip = find_local_ip
       @running = false
     end
 
@@ -30,21 +30,14 @@ module DNSSD
 
     def start
       @running = true
-      @socket = UDPSocket.new
       
-      # Improved multicast socket configuration
+      # Create and configure the original socket for backward compatibility
+      @socket = UDPSocket.new
       @socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
       
-      # Set TTL for multicast packets (4 is a good default for local network)
-      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 4)
-      
-      # Enable loopback to receive our own multicasts
-      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_LOOP, 1)
-      
-      # Note: We're not explicitly setting the outgoing interface
-      # as it can prevent Python clients from receiving our announcements
-      
-      puts "[Advertiser] Configured multicast socket with TTL=4"
+      # Create and configure the enhanced socket with proper multicast settings
+      @enhanced_socket = UDPSocket.new
+      configure_enhanced_socket(@enhanced_socket)
 
       Thread.new do
         announce_loop
@@ -56,15 +49,38 @@ module DNSSD
     def stop
       @running = false
       @socket&.close
+      @enhanced_socket&.close
     end
 
     private
+    
+    def configure_enhanced_socket(socket)
+      # Enable address reuse
+      socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
+      
+      # On non-Windows platforms, also set SO_REUSEPORT if available
+      if RUBY_PLATFORM !~ /mswin|mingw|cygwin/
+        socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEPORT, 1) rescue nil
+      end
+      
+      # Set appropriate TTL (Time To Live) for multicast packets (1-255)
+      # 1 = same subnet, 32 = same site, 64 = same region, 128 = same continent, 255 = global
+      socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 4)
+      
+      # Set the multicast interface
+      socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_IF, IPAddr.new(@ip).hton)
+      
+      # Allow loopback of our own multicast packets (useful for local testing)
+      socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_LOOP, 1)
+    end
 
     def announce_loop
       msg = build_mdns_response
       while @running
         begin
+          # Send using both the original and enhanced sockets for maximum compatibility
           @socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
+          @enhanced_socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
           sleep 5
         rescue => e
           puts "[Advertiser] Error: #{e.message}"
@@ -94,29 +110,33 @@ module DNSSD
       msg.encode
     end
 
-    def local_ip
-      # Try primary method first
+    def find_local_ip
       begin
-        udp = UDPSocket.new
-        udp.connect("8.8.8.8", 1)
-        ip = udp.addr.last
-        udp.close
-        return ip
-      rescue
-        puts "[Advertiser] Warning: Failed to detect IP via primary method, using fallback..."
+        # Try the primary method first
+        ip = primary_ip_detection
+        return ip if ip && !ip.empty? && ip != "127.0.0.1"
+      rescue => e
+        puts "[Advertiser] Primary IP detection failed: #{e.message}. Trying fallback method."
       end
-
-      # Fallback method - try to find a non-loopback IPv4 address
-      begin
-        Socket.ip_address_list.each do |addr|
-          next if addr.ipv4_loopback? || !addr.ipv4?
-          return addr.ip_address
-        end
-      rescue
-        # If all else fails, use localhost
-        puts "[Advertiser] Warning: Failed to detect IP via fallback, defaulting to 127.0.0.1"
-        return "127.0.0.1"
-      end
+      
+      # Fall back to the interface scan method
+      fallback_ip_detection
+    end
+    
+    def primary_ip_detection
+      # This is the method that was previously used
+      udp = UDPSocket.new
+      udp.connect("8.8.8.8", 1)
+      ip = udp.addr.last
+      udp.close
+      ip
+    end
+    
+    def fallback_ip_detection
+      # Try to find a suitable non-loopback IPv4 address
+      Socket.ip_address_list.detect do |addr_info|
+        addr_info.ipv4? && !addr_info.ipv4_loopback? && !addr_info.ipv4_multicast?
+      end&.ip_address || "127.0.0.1"
     end
   end
 end
