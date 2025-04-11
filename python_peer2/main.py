@@ -310,7 +310,42 @@ def handle_find_alternative_source():
         selected_peer_name = selected_source["peer"]
         selected_peer = next(p for p in active_peers if p["name"] == selected_peer_name)
         
-        # Perform key exchange with the peer
+        # Store selected verification peer if needed
+        verification_peer = None
+        
+        # Check if we should verify against another peer's hash
+        all_sources = all_known_files[filename]
+        other_sources = [s for s in all_sources if s["peer"] != selected_peer_name]
+        
+        if other_sources:
+            print("\nWould you like to verify against another peer's hash?")
+            verify = input("Verify against another source? (y/n): ").lower().strip() == 'y'
+            
+            if verify:
+                # Show other sources for verification (including inactive for hash checking)
+                print("\nChoose a source to verify against (active or inactive):")
+                for i, source in enumerate(other_sources):
+                    status = "✅ Active" if source["active"] else "❌ Inactive"
+                    print(f"{i+1}. {source['peer']} ({status}) - Hash: {source['hash']}")
+                
+                try:
+                    verify_idx = int(input("Verification source (number): ")) - 1
+                    if 0 <= verify_idx < len(other_sources):
+                        verification_peer = other_sources[verify_idx]["peer"]
+                        print(f"✅ Will verify download against hash from '{verification_peer}'")
+                    else:
+                        print("❌ Invalid selection, downloading without verification.")
+                except ValueError:
+                    print("❌ Invalid input, downloading without verification.")
+                    
+        # Now request the file properly using the standard file request flow
+        print(f"\n📥 Downloading '{filename}' from {selected_peer_name}...")
+        
+        # Check if identity exists first
+        if not ensure_identity_exists():
+            return
+            
+        # Perform ECDH key exchange
         session_key = perform_key_exchange_with_ruby(selected_peer["ip"], selected_peer["port"])
         if not session_key:
             print("❌ Key exchange failed.")
@@ -319,37 +354,13 @@ def handle_find_alternative_source():
         identity_payload = sign_session_key(session_key)
         response = send_identity_to_ruby(selected_peer["ip"], selected_peer["port"], identity_payload)
         if response:
-            # Check if we should verify against another peer's hash
-            all_sources = all_known_files[filename]
-            other_sources = [s for s in all_sources if s["peer"] != selected_peer_name]
+            # Choose which peer to use for verification
+            verify_against = verification_peer if verification_peer else selected_peer_name
+            if verification_peer:
+                print(f"✅ Downloading from '{selected_peer_name}' with verification against '{verify_against}'")
             
-            if other_sources:
-                print("\nWould you like to verify against another peer's hash?")
-                verify = input("Verify against another source? (y/n): ").lower().strip() == 'y'
-                
-                if verify:
-                    # Show other sources for verification (including inactive for hash checking)
-                    print("\nChoose a source to verify against (active or inactive):")
-                    for i, source in enumerate(other_sources):
-                        status = "✅ Active" if source["active"] else "❌ Inactive"
-                        print(f"{i+1}. {source['peer']} ({status}) - Hash: {source['hash']}")
-                    
-                    try:
-                        verify_idx = int(input("Verification source (number): ")) - 1
-                        if 0 <= verify_idx < len(other_sources):
-                            verification_peer = other_sources[verify_idx]["peer"]
-                            print(f"✅ Downloading from '{selected_peer_name}' with verification against '{verification_peer}'")
-                            request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, verification_peer)
-                        else:
-                            print("❌ Invalid selection, downloading without verification.")
-                            request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
-                    except ValueError:
-                        print("❌ Invalid input, downloading without verification.")
-                        request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
-                else:
-                    request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
-            else:
-                request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, selected_peer_name)
+            # Request the file
+            request_file(selected_peer["ip"], selected_peer["port"], filename, session_key, verify_against)
         else:
             print("❌ Error with identification")
         
