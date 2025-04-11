@@ -145,7 +145,10 @@ class FileServer:
             # Now add our request and set the event
             pending_requests.put(req_info)
             has_pending_request.set()
-            print(f"Waiting for user confirmation to transfer '{file_name}'...")
+            print("\n" + "=" * 60)
+            print(f"🔔 FILE TRANSFER REQUEST: '{file_name}'")
+            print(f"→ A confirmation prompt will appear on the main console...")
+            print("=" * 60)
             
             # Wait for response with timeout
             start_time = time.time()
@@ -231,7 +234,10 @@ class FileServer:
                 # Now add our request and set the event
                 pending_requests.put(req_info)
                 has_pending_request.set()
-                print(f"Waiting for user confirmation to transfer encrypted '{file_name}'...")
+                print("\n" + "=" * 60)
+                print(f"🔔 ENCRYPTED FILE TRANSFER REQUEST: '{file_name}'")
+                print(f"→ A confirmation prompt will appear on the main console...")
+                print("=" * 60)
                 
                 # Wait for response with timeout
                 start_time = time.time()

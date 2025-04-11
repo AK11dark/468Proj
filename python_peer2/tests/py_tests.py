@@ -142,10 +142,85 @@ def test_forward_secrecy():
     return k1 != k2
 
 
+
+def test_advertise_service():
+    print("📢 Testing service advertisement")
+    try:
+        from advertise import advertise_service, stop_advertisement
+        name = advertise_service(name="test-peer", port=6000)
+        assert name.startswith("test-peer")
+        stop_advertisement()
+        return True
+    except Exception as e:
+        print("❌ Advertise test failed:", e)
+        return False
+
+
+def test_known_peers_storage():
+    print("🔒 Testing known peer storage and loading")
+    try:
+        import os
+        from auth_handler import save_known_peer, load_known_peers
+        test_key = "-----BEGIN PUBLIC KEY-----\nFAKEKEY\n-----END PUBLIC KEY-----"
+        save_known_peer("testuser", test_key)
+        peers = load_known_peers()
+        assert peers["testuser"] == test_key
+        return True
+    except Exception as e:
+        print("❌ Peer storage test failed:", e)
+        return False
+
+
+def test_file_server_hash_calc():
+    print("🧮 Testing file hash calculation")
+    try:
+        import os
+        from file_server import FileServer
+        test_path = "/tmp/testfile.txt"
+        with open(test_path, "w") as f:
+            f.write("test content")
+        server = FileServer()
+        h = server.calculate_file_hash(test_path)
+        assert len(h) == 64  # SHA256 hash
+        os.remove(test_path)
+        return True
+    except Exception as e:
+        print("❌ Hash calculation test failed:", e)
+        return False
+
+
+def test_storage_encryption_decryption():
+    print("📁 Testing file storage encryption and decryption")
+    try:
+        from storage import SecureStorage
+        import os
+        content = b"secret test data"
+        filename = "test_secret.txt"
+        password = "strongpass"
+
+        storage = SecureStorage("test_storage")
+        enc_path = storage.store_encrypted_file(content, filename, password)
+        assert enc_path.endswith(".enc")
+
+        decrypted = storage.get_file_content(filename + ".enc", password)
+        assert decrypted == content
+
+        # Cleanup
+        os.remove(enc_path)
+        os.rmdir("test_storage")
+        return True
+    except Exception as e:
+        print("❌ Storage encryption test failed:", e)
+        return False
+
 # --- MAIN RUNNER --- #
 
 if __name__ == "__main__":
     tests = [
+        ("Storage Encryption/Decryption", test_storage_encryption_decryption),
+        ("File Server Hash Calculation", test_file_server_hash_calc),
+        ("Known Peers Storage", test_known_peers_storage),
+        ("Advertise Service", test_advertise_service),
         ("Mutual Auth Success", test_mutual_auth_success),
         ("Tampered Signature Rejected", test_mutual_auth_failure_tampered_signature),
         ("Key Mismatch Rejected", test_auth_key_mismatch),
@@ -177,3 +252,8 @@ if __name__ == "__main__":
     print("\n📊 Test Summary:")
     print(f"   ✅ Passed: {passed}")
     print(f"   ❌ Failed: {failed}")
+
+
+# --- Additional Unit Tests --- #
+
+
