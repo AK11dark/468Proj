@@ -1,5 +1,7 @@
 from zeroconf import ServiceInfo, Zeroconf
 import socket
+import random
+import string
 
 zeroconf_instance = None
 
@@ -10,6 +12,10 @@ def get_local_ip():
     s.close()
     return ip
 
+def generate_random_suffix(length=4):
+    """Generate a random hex string to make the service name unique"""
+    return ''.join(random.choices('0123456789abcdef', k=length))
+
 def advertise_service(name="python-peer", port=5003):
     global zeroconf_instance
     ip = get_local_ip()
@@ -19,14 +25,16 @@ def advertise_service(name="python-peer", port=5003):
         "network_port": str(port)
     }
 
-    service_name = f"{name}._peer._tcp.local."
+    # Add a random suffix to make the service name unique
+    unique_name = f"{name}-{generate_random_suffix()}"
+    service_name = f"{unique_name}._peer._tcp.local."
     info = ServiceInfo(
         "_peer._tcp.local.",
         service_name,
         addresses=[socket.inet_aton(ip)],
         port=port,
         properties=desc,
-        server=f"{name}.local."
+        server=f"{unique_name}.local."
     )
 
     zeroconf_instance = Zeroconf()
