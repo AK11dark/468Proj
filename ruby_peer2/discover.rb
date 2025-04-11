@@ -85,17 +85,6 @@ module PeerFinder
     ensure
       socket.close
     end
-
-    # Print once at the end
-    if discovered_peers.empty?
-      puts "❌ No peers found."
-    else
-      puts "✅ Discovered peers:"
-      discovered_peers.each_with_index do |(_, peer), i|
-        puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
-      end
-    end
-
     discovered_peers.values
   end
 end
