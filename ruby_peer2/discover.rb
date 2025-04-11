@@ -21,15 +21,28 @@ module PeerFinder
   def self.discover_peers(timeout = 10)
     socket = UDPSocket.new
     
+    puts "Starting peer discovery (timeout: #{timeout}s)..."
+    
     # Configure the socket for multicast
     socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
     
     # Bind to the multicast address and port
-    socket.bind('0.0.0.0', MDNS_PORT)
+    begin
+      socket.bind('0.0.0.0', MDNS_PORT)
+      puts "✅ Successfully bound to multicast port"
+    rescue => e
+      puts "⚠️ Could not bind to multicast port: #{e.message}"
+      puts "⚠️ Falling back to standard discovery mode"
+    end
     
     # Join the multicast group
-    membership = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
-    socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, membership)
+    begin
+      membership = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
+      socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, membership)
+      puts "✅ Successfully joined multicast group"
+    rescue => e
+      puts "⚠️ Could not join multicast group: #{e.message}"
+    end
     
     discovered_peers = {}
 
@@ -38,71 +51,80 @@ module PeerFinder
       query = Resolv::DNS::Message.new(0)
       query.add_question(SERVICE_TYPE, Resolv::DNS::Resource::IN::PTR)
       socket.send(query.encode, 0, MDNS_ADDR, MDNS_PORT)
+      puts "📤 Sent mDNS query for #{SERVICE_TYPE}"
 
       end_time = Time.now + timeout
+      puts "Listening for responses until #{end_time.strftime('%H:%M:%S')}..."
 
       while Time.now < end_time
-        readers, = IO.select([socket], [], [], 1)
-        next unless readers
+        begin
+          readers, = IO.select([socket], [], [], 1)
+          next unless readers
 
-        buf, = socket.recvfrom(2048)
-        response = Resolv::DNS::Message.decode(buf)
+          buf, sender = socket.recvfrom(4096)
+          puts "📥 Received response from #{sender[3]}:#{sender[1]}" 
+          
+          response = Resolv::DNS::Message.decode(buf)
+          
+          # Debug: Show packet information
+          puts "📦 Packet sections: #{response.answer.size} answer(s), #{response.additional.size} additional record(s)"
 
-        # Get service names
-        service_names = response.answer.select { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::PTR) }
+          # Get service names
+          service_names = response.answer.select { |_, _, r| r.is_a?(Resolv::DNS::Resource::IN::PTR) }
                                        .map { |_, _, r| r.name.to_s }
-
-        service_names.each do |name|
-          next if discovered_peers[name]
-          
-          # Extract hostname part for comparison
-          hostname = name.split("._peer._tcp.local.")[0]
-          
-          # Skip if this is our own service by comparing both hostname and full service name
-          if (@@own_hostname && hostname == @@own_hostname) || (@@own_service_name && name == @@own_service_name)
-            puts "⚠️ Skipping own service: #{name} (#{hostname})"
+                                       
+          if service_names.empty?
+            puts "⚠️ No PTR records found in response"
             next
           end
 
-          # Get additional information from the packet
-          ip = nil
-          port = nil
-          
-          # Process all additional records to find IP and port
-          response.additional.each do |record_name, ttl, record|
-            if record.is_a?(Resolv::DNS::Resource::IN::A) && record_name.to_s.include?(hostname)
-              ip = record.address.to_s
-            elsif record.is_a?(Resolv::DNS::Resource::IN::SRV) && record_name.to_s == name
-              port = record.port
+          puts "🔍 Found service names: #{service_names.join(', ')}"
+
+          service_names.each do |name|
+            next if discovered_peers[name]
+            
+            # Extract hostname part for comparison
+            hostname = name.split("._peer._tcp.local.")[0]
+            
+            # Skip if this is our own service
+            if @@own_hostname && hostname == @@own_hostname
+              puts "⚠️ Skipping own service: #{hostname}"
+              next
+            end
+
+            # Find IP and port in a simpler way
+            ip = nil
+            port = nil
+            
+            response.additional.each do |record_name, ttl, record|
+              if record.is_a?(Resolv::DNS::Resource::IN::A)
+                ip = record.address.to_s
+                puts "📍 Found IP address: #{ip} for #{record_name}"
+              elsif record.is_a?(Resolv::DNS::Resource::IN::SRV)
+                port = record.port
+                puts "🔌 Found port: #{port} for #{record_name}"
+              end
+            end
+
+            if ip && port
+              discovered_peers[name] = { name: name, ip: ip, port: port }
+              puts "✨ Discovered peer: #{name} @ #{ip}:#{port}"
+            else
+              puts "⚠️ Missing IP or port for #{name}"
             end
           end
-
-          if ip && port
-            discovered_peers[name] = { name: name, ip: ip, port: port }
-            puts "Discovered peer: #{name} @ #{ip}:#{port}"
-          end
+        rescue => e
+          puts "⚠️ Error processing response: #{e.message}"
+          puts e.backtrace.join("\n") if ENV['DEBUG']
         end
       end
     ensure
       socket.close
     end
 
-    # Print once at the end
-    if discovered_peers.empty?
-      puts "❌ No peers found."
-    else
-      puts "✅ Discovered peers:"
-      discovered_peers.each_with_index do |(_, peer), i|
-        puts "#{i + 1}. #{peer[:name]} @ #{peer[:ip]}:#{peer[:port]}"
-      end
-    end
+    puts "Discovery finished! Found #{discovered_peers.size} peer(s)"
 
-    # Final filter - only remove our exact service name
-    if @@own_service_name && discovered_peers[@@own_service_name]
-      puts "🔴 Removing own service from final results: #{@@own_service_name}"
-      discovered_peers.delete(@@own_service_name)
-    end
-
+    # Return the discovered peers
     discovered_peers.values
   end
   
