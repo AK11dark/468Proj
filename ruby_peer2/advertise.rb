@@ -31,25 +31,13 @@ module DNSSD
     def start
       @running = true
       @socket = UDPSocket.new
-      
-      # Basic socket configuration
       @socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
       
-      # Set multicast TTL to ensure packets reach local network
-      begin
-        @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 255)
-        puts "[Advertiser] ✅ Set multicast TTL to 255"
-      rescue => e
-        puts "[Advertiser] ⚠️ Couldn't set multicast TTL: #{e.message}"
-      end
+      # Set multicast TTL to ensure multicast packets travel properly
+      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 255)
       
-      # Try to enable broadcast for wider discovery
-      begin
-        @socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_BROADCAST, 1)
-        puts "[Advertiser] ✅ Enabled socket broadcast"
-      rescue => e
-        puts "[Advertiser] ⚠️ Couldn't enable broadcast: #{e.message}"
-      end
+      # Set the outgoing multicast interface
+      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_IF, IPAddr.new(@ip).hton)
 
       Thread.new do
         announce_loop
@@ -69,12 +57,10 @@ module DNSSD
       msg = build_mdns_response
       while @running
         begin
-          # Send to the multicast address
-          bytes_sent = @socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
-          puts "[Advertiser] ✅ Sent #{bytes_sent} bytes to #{MDNS_ADDR}:#{MDNS_PORT}"
+          @socket.send(msg, 0, MDNS_ADDR, MDNS_PORT)
           sleep 5
         rescue => e
-          puts "[Advertiser] ❌ Error: #{e.message}"
+          puts "[Advertiser] Error: #{e.message}"
           sleep 5
         end
       end
