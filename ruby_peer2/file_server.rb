@@ -284,7 +284,9 @@ class FileServer
     new_key_pem = message["new_key"]
     signature = Base64.decode64(message["signature"])
 
-    puts "🔍 Received new_key PEM:\n#{new_key_pem.inspect}"
+    puts "> command recieve, peer is migrating key"
+    puts "🔍 Received new_key PEM:"
+    puts "#{new_key_pem.inspect}"
 
     known_peers = load_known_peers
 
@@ -297,8 +299,12 @@ class FileServer
     old_key = OpenSSL::PKey::EC.new(known_peers[username])
 
     begin
-      # ✅ FIX: verify signature over raw new_key_pem (not hashed)
-      valid = old_key.dsa_verify_asn1(new_key_pem, signature)
+      # Create SHA-256 digest of the new key PEM string to match Python's approach
+      digest = OpenSSL::Digest::SHA256.new
+      hashed_key = digest.digest(new_key_pem)
+      
+      # Verify the signature against the hash of the new key PEM
+      valid = old_key.dsa_verify_asn1(hashed_key, signature)
 
       if valid
         puts "✅ Signature verified for key migration of #{username}"

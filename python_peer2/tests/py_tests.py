@@ -190,23 +190,55 @@ def test_file_server_hash_calc():
 def test_storage_encryption_decryption():
     print("📁 Testing file storage encryption and decryption")
     try:
+        # Create test directory if it doesn't exist
+        test_dir = "test_storage"
+        os.makedirs(test_dir, exist_ok=True)
+        
         content = b"secret test data"
         filename = "test_secret.txt"
         password = "strongpass"
 
-        storage = SecureStorage("test_storage")
+        # Initialize storage with our test directory
+        storage = SecureStorage(test_dir)
+        
+        # Store and encrypt the file
         enc_path = storage.store_encrypted_file(content, filename, password)
+        print(f"Encrypted file path: {enc_path}")
         assert enc_path.endswith(".enc")
-
-        decrypted = storage.get_file_content(filename + ".enc", password)
-        assert decrypted == content
+        assert os.path.exists(enc_path), f"Encrypted file {enc_path} does not exist"
+        
+        # Get the content back and decrypt it
+        enc_filename = os.path.basename(enc_path)
+        decrypted = storage.get_file_content(enc_filename, password)
+        assert decrypted == content, "Decrypted content doesn't match original"
 
         # Cleanup
-        os.remove(enc_path)
-        os.rmdir("test_storage")
+        if os.path.exists(enc_path):
+            os.remove(enc_path)
+        if os.path.exists(test_dir) and os.path.isdir(test_dir):
+            os.rmdir(test_dir)
+            
         return True
     except Exception as e:
         print("❌ Storage encryption test failed:", e)
+        import traceback
+        traceback.print_exc()
+        
+        # Cleanup in case of exception
+        try:
+            test_dir = "test_storage"
+            temp_file = os.path.join(test_dir, "temp_test_secret.txt")
+            enc_file = os.path.join(test_dir, "temp_test_secret.txt.enc")
+            
+            for f in [temp_file, enc_file]:
+                if os.path.exists(f):
+                    os.remove(f)
+                    
+            if os.path.exists(test_dir) and os.path.isdir(test_dir):
+                os.rmdir(test_dir)
+        except:
+            pass
+            
         return False
 
 # --- MAIN RUNNER --- #
