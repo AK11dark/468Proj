@@ -1,6 +1,7 @@
 require "socket"
 require "resolv"
 require "securerandom"
+require "ipaddr"
 
 module DNSSD
   MDNS_PORT = 5353
@@ -31,6 +32,12 @@ module DNSSD
       @running = true
       @socket = UDPSocket.new
       @socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
+      
+      # Set multicast TTL to ensure multicast packets travel properly
+      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_TTL, 255)
+      
+      # Set the outgoing multicast interface
+      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_IF, IPAddr.new(@ip).hton)
 
       Thread.new do
         announce_loop
@@ -81,11 +88,21 @@ module DNSSD
     end
 
     def local_ip
-      udp = UDPSocket.new
-      udp.connect("8.8.8.8", 1)
-      ip = udp.addr.last
-      udp.close
-      ip
+      # Try the standard approach first
+      begin
+        udp = UDPSocket.new
+        udp.connect("8.8.8.8", 1)
+        ip = udp.addr.last
+        udp.close
+        return ip
+      rescue => e
+        puts "[Advertiser] Warning: Standard IP detection failed: #{e.message}"
+      end
+
+      # Fallback method: find a suitable interface
+      Socket.ip_address_list.detect do |addr|
+        addr.ipv4? && !addr.ipv4_loopback? && !addr.ipv4_multicast?
+      end&.ip_address || "127.0.0.1"
     end
   end
 end
