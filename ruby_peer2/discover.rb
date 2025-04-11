@@ -1,6 +1,5 @@
 require "socket"
 require "resolv"
-require "ipaddr"
 
 module PeerFinder
   MDNS_PORT = 5353
@@ -17,17 +16,6 @@ module PeerFinder
 
   def self.discover_peers(timeout = 10)
     socket = UDPSocket.new
-    
-    # Configure the socket for multicast
-    socket.setsockopt(Socket::SOL_SOCKET, Socket::SO_REUSEADDR, 1)
-    
-    # Bind to the multicast address and port
-    socket.bind('0.0.0.0', MDNS_PORT)
-    
-    # Join the multicast group
-    membership = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
-    socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, membership)
-    
     discovered_peers = {}
 
     begin
