@@ -76,20 +76,26 @@ module PeerFinder
             ip = nil
             port = nil
             network_port = nil
+            target_hostname = nil
             
-            # First try to find SRV record for the service
+            # First try to find SRV record for the service and get the target hostname
             response.each_resource do |record_name, ttl, record|
               if record.is_a?(Resolv::DNS::Resource::IN::SRV) && record_name.to_s == name
                 port = record.port
-                puts "  🔌 Found SRV record for #{name} with port #{port}"
+                target_hostname = record.target.to_s
+                puts "  🔌 Found SRV record for #{name} with port #{port} and target #{target_hostname}"
               end
             end
             
-            # Then try to find A record for the hostname
+            # Then try to find A record for the hostname we got from SRV
             response.each_resource do |record_name, ttl, record|
               if record.is_a?(Resolv::DNS::Resource::IN::A)
-                ip = record.address.to_s
-                puts "  🖥️ Found A record with IP #{ip}"
+                # Match either the exact hostname or if we didn't find a target
+                # This handles cases where the A record might not match exactly what we expect
+                if !target_hostname || record_name.to_s == target_hostname || record_name.to_s.include?(name.split('.')[0])
+                  ip = record.address.to_s
+                  puts "  🖥️ Found A record with IP #{ip} for #{record_name}"
+                end
               end
             end
             
@@ -98,9 +104,17 @@ module PeerFinder
               if record.is_a?(Resolv::DNS::Resource::IN::TXT) && record_name.to_s == name
                 puts "  📝 Found TXT record for #{name}"
                 record.strings.each do |txt|
+                  puts "    - TXT value: #{txt}"
                   if txt.start_with?("network_port=")
                     network_port = txt.split('=')[1]
                     puts "  🌐 Found network_port #{network_port} in TXT record"
+                  elsif txt.start_with?("address=")
+                    # Sometimes the IP is also in the TXT record
+                    txt_ip = txt.split('=')[1]
+                    if !ip && txt_ip && !txt_ip.empty?
+                      ip = txt_ip
+                      puts "  🖥️ Found IP #{ip} in TXT record"
+                    end
                   end
                 end
               end
@@ -211,20 +225,26 @@ module PeerFinder
             ip = nil
             port = nil
             network_port = nil
+            target_hostname = nil
             
-            # First try to find SRV record for the service
+            # First try to find SRV record for the service and get the target hostname
             response.each_resource do |record_name, ttl, record|
               if record.is_a?(Resolv::DNS::Resource::IN::SRV) && record_name.to_s == name
                 port = record.port
-                puts "  🔌 Found SRV record for #{name} with port #{port}"
+                target_hostname = record.target.to_s
+                puts "  🔌 Found SRV record for #{name} with port #{port} and target #{target_hostname}"
               end
             end
             
-            # Then try to find A record for the hostname
+            # Then try to find A record for the hostname we got from SRV
             response.each_resource do |record_name, ttl, record|
               if record.is_a?(Resolv::DNS::Resource::IN::A)
-                ip = record.address.to_s
-                puts "  🖥️ Found A record with IP #{ip}"
+                # Match either the exact hostname or if we didn't find a target
+                # This handles cases where the A record might not match exactly what we expect
+                if !target_hostname || record_name.to_s == target_hostname || record_name.to_s.include?(name.split('.')[0])
+                  ip = record.address.to_s
+                  puts "  🖥️ Found A record with IP #{ip} for #{record_name}"
+                end
               end
             end
             
@@ -233,9 +253,17 @@ module PeerFinder
               if record.is_a?(Resolv::DNS::Resource::IN::TXT) && record_name.to_s == name
                 puts "  📝 Found TXT record for #{name}"
                 record.strings.each do |txt|
+                  puts "    - TXT value: #{txt}"
                   if txt.start_with?("network_port=")
                     network_port = txt.split('=')[1]
                     puts "  🌐 Found network_port #{network_port} in TXT record"
+                  elsif txt.start_with?("address=")
+                    # Sometimes the IP is also in the TXT record
+                    txt_ip = txt.split('=')[1]
+                    if !ip && txt_ip && !txt_ip.empty?
+                      ip = txt_ip
+                      puts "  🖥️ Found IP #{ip} in TXT record"
+                    end
                   end
                 end
               end
