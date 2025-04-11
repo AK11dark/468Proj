@@ -2,11 +2,10 @@ import os
 import json
 from pathlib import Path
 from discover import discover_peers
-from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives import hashes
 import socket
 import base64
+from encryption_utils import generate_key, public_key_to_pem, sign, verify
 
 BASE_DIR = Path(__file__).parent.resolve()
 KEY_PATH = BASE_DIR / "ecdsa_key.pem"
@@ -96,8 +95,8 @@ def create_identity():
             return False
 
     try:
-        # Generate EC private key
-        key = ec.generate_private_key(ec.SECP256R1())
+        # Generate EC private key using our utility function
+        key = generate_key()
         with open(KEY_PATH, "wb") as f:
             f.write(key.private_bytes(
                 encoding=serialization.Encoding.PEM,
@@ -109,12 +108,8 @@ def create_identity():
         # Ask for username
         username = input("Enter your username: ").strip()
 
-        # Extract public key in PEM format
-        pubkey = key.public_key()
-        pub_pem = pubkey.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        ).decode()
+        # Extract public key in PEM format using our utility function
+        pub_pem = public_key_to_pem(key)
 
         # Save identity information
         with open(IDENTITY_PATH, "w") as f:
@@ -140,8 +135,8 @@ def sign_session_key(session_key: bytes):
     with open(KEY_PATH, "rb") as f:
         private_key = serialization.load_pem_private_key(f.read(), password=None)
 
-    # Sign the session key
-    signature = private_key.sign(session_key, ec.ECDSA(hashes.SHA256()))
+    # Sign the session key using our utility function
+    signature = sign(private_key, session_key)
     print("🔐 Signing session key...")
     print("🔑 Session Key (hex):", session_key.hex())
     print("✍️ Signature (hex):", signature.hex())
@@ -202,20 +197,13 @@ def rotate_public_key():
     with open(KEY_PATH, "rb") as f:
         old_private_key = serialization.load_pem_private_key(f.read(), password=None)
 
-    # Generate new key pair
-    new_private_key = ec.generate_private_key(ec.SECP256R1())
-    new_public_key = new_private_key.public_key()
+    # Generate new key pair using our utility function
+    new_private_key = generate_key()
+    # Get PEM format using our utility
+    new_pubkey_pem = public_key_to_pem(new_private_key)
 
-    new_pubkey_pem = new_public_key.public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo
-    ).decode()
-
-    # Sign the new public key with old private key
-    signature = old_private_key.sign(
-        new_pubkey_pem.encode(),
-        ec.ECDSA(hashes.SHA256())
-    )
+    # Sign the new public key with old private key using our utility
+    signature = sign(old_private_key, new_pubkey_pem)
 
     # Save new private key to file
     with open(KEY_PATH, "wb") as f:

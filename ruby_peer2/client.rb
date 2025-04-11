@@ -3,6 +3,7 @@ require 'json'
 require 'openssl'
 require 'base64'
 require 'digest'
+require_relative 'cryptography'
 
 
 def request_file(ip, port, filename, session_key, original_peer_name=nil)
@@ -92,13 +93,10 @@ end
 
 def perform_key_exchange(peer_ip, peer_port)
   puts "[Ruby Client] 🧠 Generating EC key pair..."
-  ec = OpenSSL::PKey::EC.generate('prime256v1')
-  ec_public_key = ec.public_key
-
+  ec = Cryptography.generate_key
+  
   # Create a public-only version to send
-  ec_only_pub = OpenSSL::PKey::EC.new('prime256v1')
-  ec_only_pub.public_key = ec_public_key
-  pem_only_pub = ec_only_pub.to_pem
+  pem_only_pub = Cryptography.public_key_to_pem(ec)
 
   # Connect and initiate key exchange
   socket = TCPSocket.new(peer_ip, peer_port)
@@ -117,7 +115,6 @@ def perform_key_exchange(peer_ip, peer_port)
 
   # Derive shared secret
   shared_secret = ec.dh_compute_key(peer_key.public_key)
-
 
   # Apply HKDF to shared secret
   begin

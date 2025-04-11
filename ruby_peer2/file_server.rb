@@ -130,7 +130,6 @@ class FileServer
 
     begin
       pubkey = OpenSSL::PKey::EC.new(public_key_pem)
-      digest = OpenSSL::Digest::SHA256.new
       signature = [signature_hex].pack("H*")
 
       known_peers = load_known_peers
@@ -147,19 +146,22 @@ class FileServer
         end
       end
 
-      if pubkey.dsa_verify_asn1(digest.digest(session_key), signature)
+      # Use our Cryptography class for verification with proper curve handling
+      require_relative 'cryptography'
+      if Cryptography.verify(pubkey, session_key, signature)
         puts "✅ Signature verified for #{username}"
         socket.puts "A"
         return true
       else
         puts "❌ Signature invalid!"
-        socket.puts"invalid signature"
+        socket.puts "invalid signature"
         return false
       end
 
     rescue => e
-      puts "❌ Error during verification: #{e}"
-      socket.puts"unknown error"
+      puts "❌ Error during verification: #{e.class}: #{e.message}"
+      puts e.backtrace.join("\n")
+      socket.puts "unknown error"
       return false
     end
   end
@@ -284,9 +286,7 @@ class FileServer
     new_key_pem = message["new_key"]
     signature = Base64.decode64(message["signature"])
 
-    puts "> command recieve, peer is migrating key"
-    puts "🔍 Received new_key PEM:"
-    puts "#{new_key_pem.inspect}"
+    puts "🔍 Received new_key PEM:\n#{new_key_pem.inspect}"
 
     known_peers = load_known_peers
 
@@ -299,12 +299,9 @@ class FileServer
     old_key = OpenSSL::PKey::EC.new(known_peers[username])
 
     begin
-      # Create SHA-256 digest of the new key PEM string to match Python's approach
-      digest = OpenSSL::Digest::SHA256.new
-      hashed_key = digest.digest(new_key_pem)
-      
-      # Verify the signature against the hash of the new key PEM
-      valid = old_key.dsa_verify_asn1(hashed_key, signature)
+      # Use our Cryptography class for verification with proper curve handling
+      require_relative 'cryptography'
+      valid = Cryptography.verify(old_key, new_key_pem, signature)
 
       if valid
         puts "✅ Signature verified for key migration of #{username}"
@@ -316,7 +313,8 @@ class FileServer
         socket.write("R")
       end
     rescue => e
-      puts "❌ Exception during migration verification: #{e}"
+      puts "❌ Exception during migration verification: #{e.class}: #{e.message}"
+      puts e.backtrace.join("\n")
       socket.write("R")
     end
   end

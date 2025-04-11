@@ -3,6 +3,7 @@ require 'openssl'
 require 'json'
 require 'base64'
 require 'socket'
+require_relative 'cryptography'
 
 IDENTITY_PATH = "identity.json"
 KEY_PATH = "ecdsa_key.pem"
@@ -29,7 +30,7 @@ class PeerIdentity
   end
 
   def create_key
-    @key = OpenSSL::PKey::EC.generate('prime256v1')
+    @key = Cryptography.generate_key
     File.write(KEY_PATH, @key.to_pem)
     puts "🔐 New ECDSA key pair generated and saved."
   end
@@ -59,11 +60,12 @@ class PeerIdentity
   end
 
   def public_key_pem
-    pub = OpenSSL::PKey::EC.new(@key.group)
-    pub.public_key = @key.public_key
-    pub.to_pem
+    Cryptography.public_key_to_pem(@key)
   end
 
+  def sign_username
+    Cryptography.sign(@key, @username)
+  end
 
   def identity_payload
     {
@@ -87,20 +89,18 @@ class PeerIdentity
     old_key = OpenSSL::PKey::EC.new(File.read(KEY_PATH))
 
     # 🔐 Generate new ECDSA key pair
-    new_key = OpenSSL::PKey::EC.generate("prime256v1")
-    new_pubkey_only = OpenSSL::PKey::EC.new(new_key.group)
-    new_pubkey_only.public_key = new_key.public_key
+    new_key = Cryptography.generate_key
+    new_pubkey_pem = Cryptography.public_key_to_pem(new_key)
 
     # ✅ Normalize the new public key PEM to avoid newline issues
-    new_pub_pem = new_pubkey_only.to_pem.gsub("\r\n", "\n")
+    new_pub_pem = new_pubkey_pem.gsub("\r\n", "\n")
 
     puts "✍️ new_pub_pem being signed:"
     puts new_pub_pem.inspect
     puts "🔑 SHA256:", OpenSSL::Digest::SHA256.hexdigest(new_pub_pem)
 
     # ✅ Sign the normalized PEM with old private key using SHA256
-    digest = OpenSSL::Digest::SHA256.new
-    signature = old_key.dsa_sign_asn1(digest.digest(new_pub_pem))
+    signature = Cryptography.sign(old_key, new_pub_pem)
 
     # ✅ Now save the new private key and updated identity
     File.write(KEY_PATH, new_key.to_pem)
@@ -118,11 +118,9 @@ class PeerIdentity
     }
   end
 
-
   # Send authentication payload to peer after ECDH
   def send_authentication(peer_ip, peer_port, session_key)
-    digest = OpenSSL::Digest::SHA256.digest(session_key)
-    signature = @key.dsa_sign_asn1(digest)
+    signature = Cryptography.sign(@key, session_key)
 
     payload = {
       username: @username,
