@@ -41,12 +41,10 @@ module DNSSD
       # Enable loopback to receive our own multicasts
       @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_LOOP, 1)
       
-      # Set outgoing interface for multicast packets
-      # This helps with multi-interface systems
-      interface_addr = IPAddr.new(@ip).hton
-      @socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_IF, interface_addr)
+      # Note: We're not explicitly setting the outgoing interface
+      # as it can prevent Python clients from receiving our announcements
       
-      puts "[Advertiser] Configured multicast socket with TTL=4, IF=#{@ip}"
+      puts "[Advertiser] Configured multicast socket with TTL=4"
 
       Thread.new do
         announce_loop

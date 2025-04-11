@@ -31,19 +31,16 @@ module PeerFinder
         socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_MULTICAST_LOOP, 1)
       end
       
-      # Bind to multicast port
-      socket.bind('0.0.0.0', MDNS_PORT)
+      # Note: We're not binding to the multicast port because it can prevent
+      # receiving broadcasts from Python client on some platforms
+      # Instead we'll just listen for responses after sending the query
       
-      # Join multicast group
-      ip_mreq = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
-      socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, ip_mreq)
-      
-      puts "🔍 Joined multicast group #{MDNS_ADDR}:#{MDNS_PORT} for discovery"
-
       # Send PTR query
       query = Resolv::DNS::Message.new(0)
       query.add_question(SERVICE_TYPE, Resolv::DNS::Resource::IN::PTR)
       socket.send(query.encode, 0, MDNS_ADDR, MDNS_PORT)
+      
+      puts "🔍 Sent discovery query to #{MDNS_ADDR}:#{MDNS_PORT}"
 
       end_time = Time.now + timeout
 
@@ -77,13 +74,6 @@ module PeerFinder
         end
       end
     ensure
-      # Leave multicast group before closing
-      begin
-        ip_mreq = IPAddr.new(MDNS_ADDR).hton + IPAddr.new('0.0.0.0').hton
-        socket.setsockopt(Socket::IPPROTO_IP, Socket::IP_DROP_MEMBERSHIP, ip_mreq)
-      rescue
-        # Ignore errors when leaving multicast group
-      end
       socket.close
     end
 
